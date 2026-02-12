@@ -44,11 +44,7 @@ class UcPlatformGeneratorFederated(
     super.doGeneratePlatformFiles(
         mainGenerator, cmakeGenerator, makeGenerator, shouldGenerateNativeBuildFiles)
 
-    if (effectivePlatform == PlatformType.Platform.ZEPHYR) {
-      UcFederatedZephyrGenerator(
-              generator.mainDef, federate, targetConfig, srcGenPath, messageReporter)
-          .generateFiles()
-    }
+    generatePlatformSpecificFiles(UcGeneratorFactory.PlatformContext.Federated(federate))
 
     if (targetConfig.get(PlatformProperty.INSTANCE).platform == PlatformType.Platform.NATIVE &&
         !targetConfig.get(NoCompileProperty.INSTANCE)) {

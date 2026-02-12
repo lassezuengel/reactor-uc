@@ -150,7 +150,7 @@ class UcGeneratorFederated(context: LFGeneratorContext, scopeProvider: LFGlobalS
 
         messageReporter.nowhere().info("Generating code into directory $srcGenPath")
 
-        if (shouldCompile()) {
+        if (shouldCompileGeneratedCode()) {
           if (!platformGenerator.doCompile(context)) {
             context.finish(GeneratorResult.Status.FAILED, codeMaps)
             return
@@ -165,12 +165,6 @@ class UcGeneratorFederated(context: LFGeneratorContext, scopeProvider: LFGlobalS
       context.finish(GeneratorResult.Status.GENERATED, codeMaps)
     }
     return
-  }
-
-  private fun shouldCompile(): Boolean {
-    return (platform.platform == PlatformType.Platform.NATIVE ||
-        platform.platform == PlatformType.Platform.ZEPHYR) &&
-        !targetConfig.get(NoCompileProperty.INSTANCE)
   }
 
   private fun generateFederateFiles(federate: UcFederate, srcGenPath: Path) {

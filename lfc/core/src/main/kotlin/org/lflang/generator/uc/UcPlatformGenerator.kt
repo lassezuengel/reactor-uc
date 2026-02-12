@@ -37,6 +37,16 @@ abstract class UcPlatformGenerator(protected val generator: UcGenerator) {
 
   abstract fun generatePlatformFiles()
 
+  /**
+   * Allows subclasses to invoke any extra platform helpers (e.g., Zephyr CMake generation) without
+   * duplicating the dispatch logic for every generator.
+   */
+  protected fun generatePlatformSpecificFiles(context: UcGeneratorFactory.PlatformContext) {
+    UcGeneratorFactory.createPlatformArtifactGenerator(
+            generator.mainDef, targetConfig, srcGenPath, context)
+        ?.generate()
+  }
+
   private val cmakeArgs: List<String>
     get() =
         listOf(

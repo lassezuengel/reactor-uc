@@ -1,5 +1,6 @@
 package org.lflang.generator.uc
 
+import java.nio.file.Path
 import org.lflang.generator.uc.espidf.UcEspIdfCmakeGenerator
 import org.lflang.generator.uc.espidf.UcEspIdfMainGenerator
 import org.lflang.generator.uc.freertos.UcFreeRtosMainGenerator
@@ -73,6 +74,34 @@ object UcGeneratorFactory {
 
       // Default CMake generator for all other platforms
       else -> UcCmakeGeneratorNonFederated(mainDef, targetConfig, fileConfig)
+    }
+  }
+
+  /** Describes the generator context so platform helpers can tailor their output. */
+  sealed interface PlatformContext {
+    /** Non-federated, single-application context. */
+    data object Standalone : PlatformContext
+
+    /** Federated application context carrying the current federate. */
+    data class Federated(val federate: UcFederate) : PlatformContext
+  }
+
+  /**
+   * Creates a platform-specific artifact generator (e.g., Zephyr CMake emitters) if needed. Returns
+   * null when the platform uses only the standard native build files.
+   */
+  fun createPlatformArtifactGenerator(
+      mainDef: Instantiation,
+      targetConfig: TargetConfig,
+      projectRoot: Path,
+      context: PlatformContext
+  ): UcPlatformArtifactGenerator? {
+    val platform = targetConfig.get(PlatformProperty.INSTANCE).platform
+
+    return when (platform) {
+      PlatformType.Platform.ZEPHYR ->
+          UcPlatformArtifactGeneratorZephyr(mainDef, targetConfig, projectRoot, context)
+      else -> null
     }
   }
 }
