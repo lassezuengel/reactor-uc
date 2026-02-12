@@ -13,7 +13,19 @@ class UcPlatformGeneratorFederated(
 ) : UcPlatformGenerator(generator) {
 
   override val buildPath = srcGenPath.resolve("build")
-  override val targetName: String = federate.codeType
+  private val effectivePlatform: PlatformType.Platform
+    get() =
+        if (federate.platform == PlatformType.Platform.AUTO)
+            targetConfig.get(PlatformProperty.INSTANCE).platform
+        else federate.platform
+
+  override val targetName: String =
+      if (effectivePlatform == PlatformType.Platform.ZEPHYR) "zephyr" else federate.codeType
+
+  override val buildTarget: String?
+    get() = if (effectivePlatform == PlatformType.Platform.ZEPHYR) null else super.buildTarget
+
+  override fun supportsInstallTarget(): Boolean = effectivePlatform != PlatformType.Platform.ZEPHYR
 
   override fun generatePlatformFiles() {
     val generator = generator as UcGeneratorFederated
@@ -28,7 +40,15 @@ class UcPlatformGeneratorFederated(
             generator.fileConfig)
     val cmakeGenerator = UcCmakeGeneratorFederated(federate, targetConfig, generator.fileConfig)
     val makeGenerator = UcMakeGeneratorFederated(federate, targetConfig, generator.fileConfig)
-    super.doGeneratePlatformFiles(mainGenerator, cmakeGenerator, makeGenerator)
+    val shouldGenerateNativeBuildFiles = effectivePlatform != PlatformType.Platform.ZEPHYR
+    super.doGeneratePlatformFiles(
+        mainGenerator, cmakeGenerator, makeGenerator, shouldGenerateNativeBuildFiles)
+
+    if (effectivePlatform == PlatformType.Platform.ZEPHYR) {
+      UcFederatedZephyrGenerator(
+              generator.mainDef, federate, targetConfig, srcGenPath, messageReporter)
+          .generateFiles()
+    }
 
     if (targetConfig.get(PlatformProperty.INSTANCE).platform == PlatformType.Platform.NATIVE &&
         !targetConfig.get(NoCompileProperty.INSTANCE)) {

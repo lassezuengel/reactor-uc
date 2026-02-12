@@ -27,6 +27,6 @@ class UcPlatformGeneratorNonFederated(generator: UcGenerator, override val srcGe
 
     val makeGenerator = UcMakeGeneratorNonFederated(mainReactor, targetConfig, generator.fileConfig)
 
-    super.doGeneratePlatformFiles(mainGenerator, cmakeGenerator, makeGenerator)
+    super.doGeneratePlatformFiles(mainGenerator, cmakeGenerator, makeGenerator, true)
   }
 }
