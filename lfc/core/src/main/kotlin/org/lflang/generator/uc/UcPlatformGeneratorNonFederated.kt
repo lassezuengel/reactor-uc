@@ -2,12 +2,21 @@ package org.lflang.generator.uc
 
 import java.nio.file.Path
 import org.lflang.reactor
+import org.lflang.target.property.PlatformProperty
+import org.lflang.target.property.type.PlatformType
 
 class UcPlatformGeneratorNonFederated(generator: UcGenerator, override val srcGenPath: Path) :
     UcPlatformGenerator(generator) {
 
   override val buildPath = srcGenPath.resolve("build")
   override val targetName = fileConfig.name
+  private val platform: PlatformType.Platform
+    get() = targetConfig.get(PlatformProperty.INSTANCE).platform
+
+  override val buildTarget: String?
+    get() = if (platform == PlatformType.Platform.ZEPHYR) null else super.buildTarget
+
+  override fun supportsInstallTarget(): Boolean = platform != PlatformType.Platform.ZEPHYR
 
   override fun generatePlatformFiles() {
     val numEventsAndReactions = generator.totalNumEventsAndReactions(generator.mainDef.reactor)
@@ -27,6 +36,9 @@ class UcPlatformGeneratorNonFederated(generator: UcGenerator, override val srcGe
 
     val makeGenerator = UcMakeGeneratorNonFederated(mainReactor, targetConfig, generator.fileConfig)
 
-    super.doGeneratePlatformFiles(mainGenerator, cmakeGenerator, makeGenerator)
+    super.doGeneratePlatformFiles(
+        mainGenerator, cmakeGenerator, makeGenerator, platform != PlatformType.Platform.ZEPHYR)
+
+    generatePlatformSpecificFiles(UcGeneratorFactory.PlatformContext.Standalone)
   }
 }

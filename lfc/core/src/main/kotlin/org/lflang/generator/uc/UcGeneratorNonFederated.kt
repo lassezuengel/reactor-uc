@@ -10,8 +10,6 @@ import org.lflang.isGeneric
 import org.lflang.lf.Reactor
 import org.lflang.reactor
 import org.lflang.scoping.LFGlobalScopeProvider
-import org.lflang.target.property.NoCompileProperty
-import org.lflang.target.property.type.PlatformType
 import org.lflang.util.FileUtil
 
 class UcGeneratorNonFederated(context: LFGeneratorContext, scopeProvider: LFGlobalScopeProvider) :
@@ -70,8 +68,7 @@ class UcGeneratorNonFederated(context: LFGeneratorContext, scopeProvider: LFGlob
       val platformGenerator = UcPlatformGeneratorNonFederated(this, fileConfig.srcGenPath)
       platformGenerator.generatePlatformFiles()
 
-      if (platform.platform == PlatformType.Platform.NATIVE &&
-          !targetConfig.get(NoCompileProperty.INSTANCE)) {
+      if (shouldCompileGeneratedCode()) {
         if (platformGenerator.doCompile(context)) {
           context.finish(GeneratorResult.Status.COMPILED, codeMaps)
         } else {

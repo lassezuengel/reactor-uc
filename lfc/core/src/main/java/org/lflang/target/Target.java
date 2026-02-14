@@ -585,6 +585,7 @@ public enum Target {
               LoggingProperty.INSTANCE,
               CmakeIncludeProperty.INSTANCE,
               ClockSyncModeProperty.INSTANCE,
+              FedNetInterfaceProperty.INSTANCE,
               FilesProperty.INSTANCE);
 
         // case CPP ->

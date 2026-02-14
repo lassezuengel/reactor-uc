@@ -28,10 +28,24 @@ abstract class UcPlatformGenerator(protected val generator: UcGenerator) {
   abstract val buildPath: Path
   abstract val srcGenPath: Path
   abstract val targetName: String
+  open val buildTarget: String?
+    get() = targetName
+
+  protected open fun supportsInstallTarget(): Boolean = true
 
   private val relativeBinDir = fileConfig.outPath.relativize(fileConfig.binPath).toUnixString()
 
   abstract fun generatePlatformFiles()
+
+  /**
+   * Allows subclasses to invoke any extra platform helpers (e.g., Zephyr CMake generation) without
+   * duplicating the dispatch logic for every generator.
+   */
+  protected fun generatePlatformSpecificFiles(context: UcGeneratorFactory.PlatformContext) {
+    UcGeneratorFactory.createPlatformArtifactGenerator(
+            generator.mainDef, targetConfig, srcGenPath, context)
+        ?.generate()
+  }
 
   private val cmakeArgs: List<String>
     get() =
@@ -51,7 +65,8 @@ abstract class UcPlatformGenerator(protected val generator: UcGenerator) {
   fun doGeneratePlatformFiles(
       mainGenerator: UcMainGenerator,
       cmakeGenerator: UcCmakeGenerator,
-      makeGenerator: UcMakeGenerator
+      makeGenerator: UcMakeGenerator,
+      generateNativeBuildFiles: Boolean = true
   ) {
     val reactorUCEnvPath = System.getenv("REACTOR_UC_PATH")
     if (reactorUCEnvPath == null) {
@@ -81,8 +96,10 @@ abstract class UcPlatformGenerator(protected val generator: UcGenerator) {
 
     FileUtil.writeToFile(
         cmakeGenerator.generateIncludeCmake(ucSources), srcGenPath.resolve("Include.cmake"), true)
-    FileUtil.writeToFile(
-        cmakeGenerator.generateMainCmakeNative(), srcGenPath.resolve("CMakeLists.txt"), true)
+    if (generateNativeBuildFiles) {
+      FileUtil.writeToFile(
+          cmakeGenerator.generateMainCmakeNative(), srcGenPath.resolve("CMakeLists.txt"), true)
+    }
     val runtimeDestinationPath: Path = srcGenPath.resolve("reactor-uc")
     if (fileConfig.runtimeSymlink) {
       if (runtimeDestinationPath.exists() && !runtimeDestinationPath.isSymbolicLink()) {
@@ -102,8 +119,10 @@ abstract class UcPlatformGenerator(protected val generator: UcGenerator) {
           false)
     }
 
-    FileUtil.writeToFile(
-        makeGenerator.generateMake(ucSources), srcGenPath.resolve("Makefile"), true)
+    if (generateNativeBuildFiles) {
+      FileUtil.writeToFile(
+          makeGenerator.generateMake(ucSources), srcGenPath.resolve("Makefile"), true)
+    }
   }
 
   fun doCompile(context: LFGeneratorContext, onlyGenerateBuildFiles: Boolean = false): Boolean {
@@ -124,21 +143,29 @@ abstract class UcPlatformGenerator(protected val generator: UcGenerator) {
 
       if (cmakeReturnCode == 0 && !onlyGenerateBuildFiles) {
         // If cmake succeeded, run make
-        val makeCommand = createMakeCommand(buildPath, parallelize, targetName)
+        val makeCommand = createMakeCommand(buildPath, parallelize, buildTarget)
         val makeReturnCode =
             UcValidator(fileConfig, messageReporter, codeMaps)
                 .run(makeCommand, context.cancelIndicator)
         var installReturnCode = 0
+        val shouldInstall = supportsInstallTarget()
         if (makeReturnCode == 0) {
-          val installCommand = createMakeCommand(buildPath, parallelize, "install")
-          installReturnCode = installCommand.run(context.cancelIndicator)
-          if (installReturnCode == 0) {
+          if (shouldInstall) {
+            val installCommand = createMakeCommand(buildPath, parallelize, "install")
+            installReturnCode = installCommand.run(context.cancelIndicator)
+            if (installReturnCode == 0) {
+              println("SUCCESS (compiling generated C code)")
+              println("Generated source code is in ${fileConfig.srcGenPath}")
+              println("Compiled binary is in ${fileConfig.binPath}")
+            }
+          } else {
             println("SUCCESS (compiling generated C code)")
             println("Generated source code is in ${fileConfig.srcGenPath}")
-            println("Compiled binary is in ${fileConfig.binPath}")
+            println("Build directory is ${buildPath}")
           }
         }
-        if ((makeReturnCode != 0 || installReturnCode != 0) && !messageReporter.errorsOccurred) {
+        if ((makeReturnCode != 0 || (shouldInstall && installReturnCode != 0)) &&
+            !messageReporter.errorsOccurred) {
           // If errors occurred but none were reported, then the following message is the best we
           // can do.
           messageReporter.nowhere().error("make failed with error code $makeReturnCode")
@@ -186,11 +213,13 @@ abstract class UcPlatformGenerator(protected val generator: UcGenerator) {
     return 0
   }
 
-  private fun getMakeArgs(buildPath: Path, parallelize: Boolean, target: String): List<String> {
+  private fun getMakeArgs(buildPath: Path, parallelize: Boolean, target: String?): List<String> {
     val cmakeConfig = buildTypeToCmakeConfig(targetConfig.get(BuildTypeProperty.INSTANCE))
-    val makeArgs =
-        mutableListOf(
-            "--build", buildPath.fileName.toString(), "--config", cmakeConfig, "--target", target)
+    val makeArgs = mutableListOf("--build", buildPath.fileName.toString(), "--config", cmakeConfig)
+
+    if (target != null) {
+      makeArgs.addAll(listOf("--target", target))
+    }
 
     if (parallelize) {
       makeArgs.addAll(listOf("--parallel", Runtime.getRuntime().availableProcessors().toString()))
@@ -199,7 +228,7 @@ abstract class UcPlatformGenerator(protected val generator: UcGenerator) {
     return makeArgs
   }
 
-  private fun createMakeCommand(buildPath: Path, parallelize: Boolean, target: String): LFCommand {
+  private fun createMakeCommand(buildPath: Path, parallelize: Boolean, target: String?): LFCommand {
     val makeArgs = getMakeArgs(buildPath, parallelize, target)
     return commandFactory.createCommand("cmake", makeArgs, buildPath.parent)
   }

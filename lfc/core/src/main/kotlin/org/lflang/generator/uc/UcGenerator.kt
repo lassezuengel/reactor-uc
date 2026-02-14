@@ -16,6 +16,7 @@ import org.lflang.reactor
 import org.lflang.scoping.LFGlobalScopeProvider
 import org.lflang.target.Target
 import org.lflang.target.property.*
+import org.lflang.target.property.type.PlatformType
 
 /** Creates either a Federated or NonFederated generator depending on the type of LF program */
 fun createUcGenerator(
@@ -117,6 +118,17 @@ abstract class UcGenerator(
     resources.addAll(importedRresources.map { getAllImportedResources(it) }.flatten())
     resources.add(resource)
     return resources
+  }
+
+  /**
+   * Centralizes the decision on whether the generated sources should be built immediately.
+   * Platforms that emit full build tooling (currently native and Zephyr) opt in here, as long as
+   * users have not disabled compilation via the {@code no-compile} target property.
+   */
+  protected fun shouldCompileGeneratedCode(): Boolean {
+    return (platform.platform == PlatformType.Platform.NATIVE ||
+        platform.platform == PlatformType.Platform.ZEPHYR) &&
+        !targetConfig.get(NoCompileProperty.INSTANCE)
   }
 
   override fun getTarget() = Target.UC
