@@ -112,9 +112,7 @@ object IpAddressManager {
 
   @Synchronized
   fun acquireIp(ip: IPAddress) {
-    val loopbackIpv4 = IPAddress.fromString("127.0.0.1")
-    val loopbackIpv6 = IPAddress.fromString("::1")
-    if (ip != loopbackIpv4 && ip != loopbackIpv6) {
+    if (ip != IPAddress.fromString("127.0.0.1")) {
       require(!usedIps.contains(ip))
       usedIps.add(ip)
     }

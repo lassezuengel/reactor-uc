@@ -10,9 +10,6 @@ import org.lflang.generator.uc.UcPortGenerator.Companion.arrayLength
 import org.lflang.generator.uc.UcPortGenerator.Companion.isArray
 import org.lflang.generator.uc.UcReactorGenerator.Companion.codeType
 import org.lflang.lf.*
-import org.lflang.target.TargetConfig
-import org.lflang.target.property.FedNetInterfaceProperty
-import org.lflang.target.property.type.FedNetInterfaceType.FedNetInterface
 
 /**
  * This generator creates code for configuring the connections between reactors. This is perhaps the
@@ -25,9 +22,8 @@ class UcConnectionGenerator(
         UcFederate?, // The federate to generate connections for. If set then `reactor` should be
     // the top-level reactor.
     private val allFederates:
-        List<UcFederate>, // A list of all the federates in the program. Only used for federated
+        List<UcFederate> // A list of all the federates in the program. Only used for federated
     // code-gen.
-    private val targetConfig: TargetConfig? = null
 ) {
 
   /** A list containing all non-federated gruoped connections within this reactor. */
@@ -40,11 +36,6 @@ class UcConnectionGenerator(
   private val federatedConnectionBundles: List<UcFederatedConnectionBundle>
 
   private val isFederated = currentFederate != null
-
-  private val useIpv6Networking: Boolean =
-      if (isFederated)
-          targetConfig?.get(FedNetInterfaceProperty.INSTANCE) == FedNetInterface.SICSLOWPAN
-      else false
 
   /**
    * Given a LF connection and possibly the list of federates of the program. Create all the
@@ -183,21 +174,16 @@ class UcConnectionGenerator(
      */
     private var allFederatedConnectionBundles: List<UcFederatedConnectionBundle> = emptyList()
 
-    fun getNumNetworkBundles(federate: UcFederate): Int =
-        allFederatedConnectionBundles.count { it.src == federate || it.dest == federate }
-
     /**
      * This function takes a list of grouped connections and creates the necessary
      * FederatedConnectionBundles. The bundles are written to the global variable
      * allFederatedConnectionBundles and shared accross federates. Thus, this function should only
      * be called once during code-gen.
      */
-    private fun createFederatedConnectionBundles(
-        groupedConnections: List<UcGroupedConnection>,
-        useIpv6: Boolean
-    ) {
+    private fun createFederatedConnectionBundles(groupedConnections: List<UcGroupedConnection>) {
       val groupedSet = HashSet(groupedConnections)
       val bundles = mutableListOf<UcFederatedConnectionBundle>()
+
       // This while loop bundles GroupedConnections togheter until there are no more left.
       while (groupedSet.isNotEmpty()) {
         // Get an unbundled GroupedConnection
@@ -213,7 +199,7 @@ class UcConnectionGenerator(
               }
 
           // Create a new ConnectionBundle with these groups
-          bundles.add(UcFederatedConnectionBundle(g.srcFed, g.destFed, group, useIpv6))
+          bundles.add(UcFederatedConnectionBundle(g.srcFed, g.destFed, group))
 
           // Remove all those grouped connections.
           toRemove.addAll(group)
@@ -225,18 +211,10 @@ class UcConnectionGenerator(
   }
 
   init {
-    if (isFederated) {
-      requireNotNull(targetConfig) { "targetConfig required when generating federated connections" }
-    }
     // Only pass through all federates and add NetworkInterface objects to them once.
     if (isFederated && !federateInterfacesInitialized) {
-      if (useIpv6Networking) {
-        UcZephyrIpv6Allocator.reset()
-      }
       for (fed in allFederates) {
-        UcNetworkInterfaceFactory.createInterfaces(fed, useIpv6Networking).forEach {
-          fed.addInterface(it)
-        }
+        UcNetworkInterfaceFactory.createInterfaces(fed).forEach { fed.addInterface(it) }
       }
       federateInterfacesInitialized = true
     }
@@ -251,7 +229,7 @@ class UcConnectionGenerator(
     if (isFederated) {
       // Only parse out federated connection bundles once for the very first federate
       if (allFederatedConnectionBundles.isEmpty()) {
-        createFederatedConnectionBundles(grouped, useIpv6Networking)
+        createFederatedConnectionBundles(grouped)
       }
 
       // Filter out the relevant bundles for this federate

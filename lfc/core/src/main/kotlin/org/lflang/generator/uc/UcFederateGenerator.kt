@@ -15,8 +15,7 @@ class UcFederateGenerator(
 
   private val container = currentFederate.inst.eContainer() as Reactor
   private val reactor = currentFederate.inst.reactor
-  private val connections =
-      UcConnectionGenerator(container, currentFederate, otherFederates, targetConfig)
+  private val connections = UcConnectionGenerator(container, currentFederate, otherFederates)
   private val parameters = UcParameterGenerator(container, currentFederate)
   private val ports = UcPortGenerator(container, connections)
   private val reactions = UcReactionGenerator(container)
@@ -49,7 +48,7 @@ class UcFederateGenerator(
         ${" |  "..instances.generateReactorStructField(currentFederate.inst)}
         ${" |  "..connections.generateReactorStructFields()}
         ${" |  "..connections.generateFederateStructFields()}
-            |  // Startup and clock sync objects.
+            |  // Startup and clock sync objects. 
         ${" |  "..startupCooordinator.generateFederateStructField()}
         ${" |  "..clockSync.generateFederateStructField()}
             |  LF_FEDERATE_BOOKKEEPING_INSTANCES(${connections.getNumFederatedConnectionBundles()})

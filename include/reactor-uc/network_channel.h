@@ -129,20 +129,6 @@ struct AsyncNetworkChannel {
   NetworkChannel super;
 };
 
-#ifdef PLATFORM_ZEPHYR
-/**
- * @brief Initialize the connection manager. This is to be done before starting any federation.
- * @ingroup Federated
- */
-void lf_init_connection_manager(void);
-
-/**
- * @brief Wait for network connection to be established.
- * @ingroup Federated
- */
-void lf_wait_for_network_connection(void);
-#endif // PLATFORM_ZEPHYR
-
 #ifdef NETWORK_CHANNEL_UART
 #include "network_channel/uart_channel.h"
 #endif
