@@ -121,7 +121,8 @@ class UcFederatedGroupedConnection(
 class UcFederatedConnectionBundle(
     val src: UcFederate,
     val dest: UcFederate,
-    val groupedConnections: List<UcFederatedGroupedConnection>
+    val groupedConnections: List<UcFederatedGroupedConnection>,
+    private val useIpv6: Boolean
 ) {
 
   init {
@@ -130,7 +131,7 @@ class UcFederatedConnectionBundle(
   }
 
   val networkChannel: UcNetworkChannel =
-      UcNetworkChannel.createNetworkEndpointsAndChannelForBundle(this)
+      UcNetworkChannel.createNetworkEndpointsAndChannelForBundle(this, useIpv6)
 
   fun numOutputs(federate: UcFederate) = groupedConnections.count { it.srcFed == federate }
 

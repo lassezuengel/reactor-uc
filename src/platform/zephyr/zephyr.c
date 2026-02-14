@@ -3,13 +3,14 @@
 #include <assert.h>
 #include <stdbool.h>
 #include <string.h>
+#include <stdio.h>
 
 #include "zephyr/sys/time_units.h"
 #include <zephyr/fatal_types.h>
 
 static PlatformZephyr platform;
 
-void Platform_vprintf(const char* fmt, va_list args) { vprintk(fmt, args); }
+void Platform_vprintf(const char* fmt, va_list args) { vprintf(fmt, args); }
 
 // Catch kernel panics from Zephyr
 void k_sys_fatal_error_handler(unsigned int reason, const struct arch_esf* esf) {
