@@ -16,43 +16,40 @@ enum class NetworkChannelType {
 }
 
 object UcNetworkInterfaceFactory {
-  private val creators:
-      Map<NetworkChannelType, (federate: UcFederate, attr: Attribute) -> UcNetworkInterface> =
-      mapOf(
-          Pair(TCP_IP) { federate, attr -> UcTcpIpInterface.fromAttribute(federate, attr) },
-          Pair(COAP_UDP_IP) { federate, attr ->
-            UcCoapUdpIpInterface.fromAttribute(federate, attr)
-          },
-          Pair(CUSTOM) { federate, attr -> UcCustomInterface.fromAttribute(federate, attr) },
-          Pair(UART) { federate, attr -> UcUARTInterface.fromAttribute(federate, attr) },
-          Pair(S4NOC) { federate, attr -> UcS4NocInterface.fromAttribute(federate, attr) })
-
-  fun createInterfaces(federate: UcFederate): List<UcNetworkInterface> {
+  fun createInterfaces(federate: UcFederate, useIpv6: Boolean): List<UcNetworkInterface> {
     val attrs: List<Attribute> = getInterfaceAttributes(federate.inst)
     return if (attrs.isEmpty()) {
-      listOf(createDefaultInterface())
+      listOf(createDefaultInterface(useIpv6))
     } else {
-      attrs.map { createInterfaceFromAttribute(federate, it) }
+      attrs.map { createInterfaceFromAttribute(federate, it, useIpv6) }
     }
   }
 
   private fun createInterfaceFromAttribute(
       federate: UcFederate,
-      attr: Attribute
+      attr: Attribute,
+      useIpv6: Boolean
   ): UcNetworkInterface {
     val protocol = attr.attrName.substringAfter("_")
     return when (protocol) {
-      "tcp" -> creators.get(TCP_IP)!!.invoke(federate, attr)
-      "uart" -> creators.get(UART)!!.invoke(federate, attr)
-      "coap" -> creators.get(COAP_UDP_IP)!!.invoke(federate, attr)
-      "s4noc" -> creators.get(S4NOC)!!.invoke(federate, attr)
-      "custom" -> creators.get(CUSTOM)!!.invoke(federate, attr)
+      "tcp" -> UcTcpIpInterface.fromAttribute(federate, attr, useIpv6)
+      "uart" -> UcUARTInterface.fromAttribute(federate, attr)
+      "coap" -> UcCoapUdpIpInterface.fromAttribute(federate, attr, useIpv6)
+      "s4noc" -> UcS4NocInterface.fromAttribute(federate, attr)
+      "custom" -> UcCustomInterface.fromAttribute(federate, attr)
       else -> throw IllegalArgumentException("Unrecognized interface attribute $attr")
     }
   }
 
-  private fun createDefaultInterface(): UcNetworkInterface =
-      UcTcpIpInterface(ipAddress = IPAddress.fromString("127.0.0.1"))
+  private fun createDefaultInterface(useIpv6: Boolean): UcNetworkInterface =
+      if (useIpv6) {
+        val autoAddr = UcZephyrIpv6Allocator.nextAddress()
+        IpAddressManager.acquireIp(autoAddr)
+        UcZephyrIpv6Allocator.markAsUsed(autoAddr)
+        UcTcpIpInterface(ipAddress = autoAddr)
+      } else {
+        UcTcpIpInterface(ipAddress = IPAddress.fromString("127.0.0.1"))
+      }
 }
 
 // A NetworkEndpoint is a communication endpoint located at the UcNetworkInterface of a federate.
@@ -100,6 +97,8 @@ class UcTcpIpInterface(private val ipAddress: IPAddress, name: String? = null) :
   override val includeHeaders: String = ""
   override val compileDefs: String = "NETWORK_CHANNEL_TCP_POSIX"
 
+  fun getIpAddress(): IPAddress = ipAddress
+
   fun createEndpoint(port: Int?): UcTcpIpEndpoint {
     val portNum =
         if (port != null) {
@@ -114,7 +113,7 @@ class UcTcpIpInterface(private val ipAddress: IPAddress, name: String? = null) :
   }
 
   companion object {
-    fun fromAttribute(federate: UcFederate, attr: Attribute): UcTcpIpInterface {
+    fun fromAttribute(federate: UcFederate, attr: Attribute, useIpv6: Boolean): UcTcpIpInterface {
       val address = attr.getParamString("address")
       val name = attr.getParamString("name")
       val ip =
@@ -126,9 +125,11 @@ class UcTcpIpInterface(private val ipAddress: IPAddress, name: String? = null) :
             }
             address
           } else {
-            IPAddress.fromString("127.0.0.1")
+            if (useIpv6) UcZephyrIpv6Allocator.nextAddress()
+            else IPAddress.fromString("127.0.0.1")
           }
       IpAddressManager.acquireIp(ip)
+      UcZephyrIpv6Allocator.markAsUsed(ip)
       return UcTcpIpInterface(ip, name)
     }
   }
@@ -180,7 +181,11 @@ class UcCoapUdpIpInterface(private val ipAddress: IPAddress, name: String? = nul
   }
 
   companion object {
-    fun fromAttribute(federate: UcFederate, attr: Attribute): UcCoapUdpIpInterface {
+    fun fromAttribute(
+      federate: UcFederate,
+      attr: Attribute,
+      useIpv6: Boolean
+    ): UcCoapUdpIpInterface {
       val address = attr.getParamString("address")
       val name = attr.getParamString("name")
       val ip =
@@ -192,9 +197,10 @@ class UcCoapUdpIpInterface(private val ipAddress: IPAddress, name: String? = nul
             }
             address
           } else {
-            IPAddress.fromString("127.0.0.1")
+            if (useIpv6) UcZephyrIpv6Allocator.nextAddress() else IPAddress.fromString("127.0.0.1")
           }
       IpAddressManager.acquireIp(ip)
+      UcZephyrIpv6Allocator.markAsUsed(ip)
       return UcCoapUdpIpInterface(ip, name)
     }
   }
@@ -266,7 +272,8 @@ abstract class UcNetworkChannel(
      * channels. Create an endpoint at source and destination and a UcNetworkChannel connecting the,
      */
     fun createNetworkEndpointsAndChannelForBundle(
-        bundle: UcFederatedConnectionBundle
+        bundle: UcFederatedConnectionBundle,
+        useIpv6: Boolean
     ): UcNetworkChannel {
       val attr: Attribute? = getLinkAttribute(bundle.groupedConnections.first().lfConn)
       var srcIf: UcNetworkInterface
@@ -303,7 +310,7 @@ abstract class UcNetworkChannel(
               (srcIf as UcTcpIpInterface).createEndpoint(if (serverLhs) serverPort else null)
           val destEp =
               (destIf as UcTcpIpInterface).createEndpoint(if (!serverLhs) serverPort else null)
-          channel = UcTcpIpChannel(srcEp, destEp, serverLhs)
+          channel = UcTcpIpChannel(srcEp, destEp, serverLhs, useIpv6)
         }
 
         UART -> {
@@ -339,15 +346,45 @@ class UcTcpIpChannel(
     src: UcTcpIpEndpoint,
     dest: UcTcpIpEndpoint,
     serverLhs: Boolean = true,
+    private val useIpv6: Boolean = false,
 ) : UcNetworkChannel(TCP_IP, src, dest, serverLhs) {
   private val srcTcp = src
   private val destTcp = dest
+  private val protocolFamily = if (useIpv6) "AF_INET6" else "AF_INET"
+  private val serverEndpoint = if (serverLhs) srcTcp else destTcp
+  private val serverAddress = serverEndpoint.ipAddress.address
+  private val serverPort = serverEndpoint.port
 
-  override fun generateChannelCtorSrc() =
-      "TcpIpChannel_ctor(&self->channel, \"${if (serverLhs) srcTcp.ipAddress.address else destTcp.ipAddress.address}\", ${if (serverLhs) srcTcp.port else destTcp.port}, AF_INET, ${serverLhs});"
+  private fun ctorString(isServer: Boolean): String {
+    val role = if (isServer) "true" else "false"
+    return "TcpIpChannel_ctor(&self->channel, \"${serverAddress}\", ${serverPort}, ${protocolFamily}, ${role});"
+  }
 
-  override fun generateChannelCtorDest() =
-      "TcpIpChannel_ctor(&self->channel, \"${if (serverLhs) srcTcp.ipAddress.address else destTcp.ipAddress.address}\", ${if (serverLhs) srcTcp.port else destTcp.port}, AF_INET, ${!serverLhs});"
+  // override fun generateChannelCtorSrc(): String {
+  //   return ctorString(serverLhs)
+  // }
+
+  // override fun generateChannelCtorDest(): String {
+  //   return ctorString(!serverLhs)
+  // }
+
+  // fun generateChannelCtorForRole(isServer: Boolean): String = ctorString(isServer)
+
+  override fun generateChannelCtorSrc(): String {
+    val isServer = serverLhs
+    val host = serverAddress
+    val port = serverPort
+    val role = if (isServer) "true" else "false"
+    return "TcpIpChannel_ctor(&self->channel, \"${host}\", ${port}, ${protocolFamily}, ${role});"
+  }
+
+  override fun generateChannelCtorDest(): String {
+    val isServer = !serverLhs
+    val host = serverAddress
+    val port = serverPort
+    val role = if (isServer) "true" else "false"
+    return "TcpIpChannel_ctor(&self->channel, \"${host}\", ${port}, ${protocolFamily}, ${role});"
+  }
 
   override val codeType: String
     get() = "TcpIpChannel"

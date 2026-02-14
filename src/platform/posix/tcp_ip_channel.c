@@ -9,8 +9,10 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/select.h>
 #include <sys/socket.h>
+#include <netinet/in.h>
 #include <unistd.h>
 #include <pthread.h>
 
@@ -38,6 +40,39 @@
 
 // Forward declarations
 static void* _TcpIpChannel_worker_thread(void* untyped_self);
+
+static lf_ret_t _TcpIpChannel_fill_sockaddr(TcpIpChannel* self, struct sockaddr_storage* storage,
+                                            socklen_t* addrlen) {
+  memset(storage, 0, sizeof(*storage));
+
+  switch (self->protocol_family) {
+  case AF_INET: {
+    struct sockaddr_in* addr4 = (struct sockaddr_in*)storage;
+    addr4->sin_family = AF_INET;
+    addr4->sin_port = htons(self->port);
+    if (inet_pton(AF_INET, self->host, &addr4->sin_addr) <= 0) {
+      TCP_IP_CHANNEL_ERR("Invalid IPv4 address %s", self->host);
+      return LF_INVALID_VALUE;
+    }
+    *addrlen = sizeof(struct sockaddr_in);
+    return LF_OK;
+  }
+  case AF_INET6: {
+    struct sockaddr_in6* addr6 = (struct sockaddr_in6*)storage;
+    addr6->sin6_family = AF_INET6;
+    addr6->sin6_port = htons(self->port);
+    if (inet_pton(AF_INET6, self->host, &addr6->sin6_addr) <= 0) {
+      TCP_IP_CHANNEL_ERR("Invalid IPv6 address %s", self->host);
+      return LF_INVALID_VALUE;
+    }
+    *addrlen = sizeof(struct sockaddr_in6);
+    return LF_OK;
+  }
+  default:
+    TCP_IP_CHANNEL_ERR("Unsupported protocol family %d", self->protocol_family);
+    return LF_INVALID_VALUE;
+  }
+}
 
 static void _TcpIpChannel_update_state_locked(TcpIpChannel* self, NetworkChannelState new_state) {
 
@@ -137,19 +172,16 @@ static void _TcpIpChannel_spawn_worker_thread(TcpIpChannel* self) {
 }
 
 static lf_ret_t _TcpIpChannel_server_bind(TcpIpChannel* self) {
-  struct sockaddr_in serv_addr;
-  serv_addr.sin_family = self->protocol_family;
-  serv_addr.sin_port = htons(self->port);
+  struct sockaddr_storage serv_addr;
+  socklen_t addrlen = 0;
   TCP_IP_CHANNEL_INFO("Bind to %s:%u", self->host, self->port);
 
-  // turn human-readable address into something the os can work with
-  if (inet_pton(self->protocol_family, self->host, &serv_addr.sin_addr) <= 0) {
-    TCP_IP_CHANNEL_ERR("Invalid address %s", self->host);
-    return LF_INVALID_VALUE;
+  lf_ret_t addr_ret = _TcpIpChannel_fill_sockaddr(self, &serv_addr, &addrlen);
+  if (addr_ret != LF_OK) {
+    return addr_ret;
   }
 
-  // bind the socket to that address
-  int ret = bind(self->fd, (struct sockaddr*)&serv_addr, sizeof(serv_addr));
+  int ret = bind(self->fd, (struct sockaddr*)&serv_addr, addrlen);
   if (ret < 0) {
     TCP_IP_CHANNEL_ERR("Could not bind to %s:%d errno=%d", self->host, self->port, errno);
     throw("bind() failed");
@@ -172,14 +204,27 @@ static lf_ret_t _TcpIpChannel_try_connect_server(NetworkChannel* untyped_self) {
   TcpIpChannel* self = (TcpIpChannel*)untyped_self;
 
   int new_socket;
-  struct sockaddr_in address;
+  struct sockaddr_storage address;
   socklen_t addrlen = sizeof(address);
 
   new_socket = accept(self->fd, (struct sockaddr*)&address, &addrlen);
   if (new_socket >= 0) {
     self->client = new_socket;
     FD_SET(new_socket, &self->set);
-    TCP_IP_CHANNEL_INFO("Connceted to client with address %s", inet_ntoa(address.sin_addr));
+    char addr_str[INET6_ADDRSTRLEN] = {0};
+    const char* formatted = NULL;
+    if (address.ss_family == AF_INET) {
+      struct sockaddr_in* addr4 = (struct sockaddr_in*)&address;
+      formatted = inet_ntop(AF_INET, &addr4->sin_addr, addr_str, sizeof(addr_str));
+    } else if (address.ss_family == AF_INET6) {
+      struct sockaddr_in6* addr6 = (struct sockaddr_in6*)&address;
+      formatted = inet_ntop(AF_INET6, &addr6->sin6_addr, addr_str, sizeof(addr_str));
+    }
+    if (formatted == NULL) {
+      TCP_IP_CHANNEL_INFO("Connected to client with address <unavailable>");
+    } else {
+      TCP_IP_CHANNEL_INFO("Connected to client with address %s", formatted);
+    }
     _TcpIpChannel_update_state(self, NETWORK_CHANNEL_STATE_CONNECTED);
     return LF_OK;
   } else {
@@ -202,16 +247,15 @@ static lf_ret_t _TcpIpChannel_try_connect_client(NetworkChannel* untyped_self) {
 
   if (_TcpIpChannel_get_state(self) == NETWORK_CHANNEL_STATE_OPEN) {
     // First time trying to connect
-    struct sockaddr_in serv_addr;
+    struct sockaddr_storage serv_addr;
+    socklen_t addrlen = 0;
 
-    serv_addr.sin_family = self->protocol_family;
-    serv_addr.sin_port = htons(self->port);
-
-    if (inet_pton(self->protocol_family, self->host, &serv_addr.sin_addr) <= 0) {
-      return LF_INVALID_VALUE;
+    lf_ret_t addr_ret = _TcpIpChannel_fill_sockaddr(self, &serv_addr, &addrlen);
+    if (addr_ret != LF_OK) {
+      return addr_ret;
     }
 
-    int ret = connect(self->fd, (struct sockaddr*)&serv_addr, sizeof(serv_addr));
+    int ret = connect(self->fd, (struct sockaddr*)&serv_addr, addrlen);
     if (ret == 0) {
       TCP_IP_CHANNEL_INFO("Connected to server on %s:%d", self->host, self->port);
       _TcpIpChannel_update_state(self, NETWORK_CHANNEL_STATE_CONNECTED);
@@ -569,6 +613,8 @@ static bool TcpIpChannel_is_connected(NetworkChannel* untyped_self) {
 void TcpIpChannel_ctor(TcpIpChannel* self, const char* host, unsigned short port, int protocol_family, bool is_server) {
   assert(self != NULL);
   assert(host != NULL);
+
+  LF_INFO(NET, "Ctor host=%s port=%u role=%d", host, port, is_server);
 
 #ifdef PLATFORM_POSIX
   // Ignore SIGPIPE signals. Instead handle this error in the send_blocking function
