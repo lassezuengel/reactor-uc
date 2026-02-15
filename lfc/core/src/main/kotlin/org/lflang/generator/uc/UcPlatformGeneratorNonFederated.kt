@@ -18,6 +18,9 @@ class UcPlatformGeneratorNonFederated(generator: UcGenerator, override val srcGe
 
   override fun supportsInstallTarget(): Boolean = platform != PlatformType.Platform.ZEPHYR
 
+  override fun shouldCleanBuildDirectory(): Boolean =
+      platform == PlatformType.Platform.ZEPHYR
+
   override fun generatePlatformFiles() {
     val numEventsAndReactions = generator.totalNumEventsAndReactions(generator.mainDef.reactor)
 

@@ -1,9 +1,10 @@
 package org.lflang.generator.uc
 
+import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
-import kotlin.io.path.*
+import java.util.Comparator
 import org.lflang.MessageReporter
 import org.lflang.generator.CodeMap
 import org.lflang.generator.GeneratorCommandFactory
@@ -33,6 +34,8 @@ abstract class UcPlatformGenerator(protected val generator: UcGenerator) {
 
   protected open fun supportsInstallTarget(): Boolean = true
 
+  protected open fun shouldCleanBuildDirectory(): Boolean = false
+
   private val relativeBinDir = fileConfig.outPath.relativize(fileConfig.binPath).toUnixString()
 
   abstract fun generatePlatformFiles()
@@ -61,7 +64,6 @@ abstract class UcPlatformGenerator(protected val generator: UcGenerator) {
         }
   }
 
-  @OptIn(ExperimentalPathApi::class)
   fun doGeneratePlatformFiles(
       mainGenerator: UcMainGenerator,
       cmakeGenerator: UcCmakeGenerator,
@@ -102,13 +104,15 @@ abstract class UcPlatformGenerator(protected val generator: UcGenerator) {
     }
     val runtimeDestinationPath: Path = srcGenPath.resolve("reactor-uc")
     if (fileConfig.runtimeSymlink) {
-      if (runtimeDestinationPath.exists() && !runtimeDestinationPath.isSymbolicLink()) {
-        runtimeDestinationPath.deleteRecursively()
+      Files.createDirectories(runtimeDestinationPath.parent)
+      if (Files.exists(runtimeDestinationPath) && !Files.isSymbolicLink(runtimeDestinationPath)) {
+        deletePathRecursively(runtimeDestinationPath)
       }
-      runtimeDestinationPath.createSymbolicLinkPointingTo(runtimePath)
+      Files.deleteIfExists(runtimeDestinationPath)
+      Files.createSymbolicLink(runtimeDestinationPath, runtimePath)
     } else {
-      if (runtimeDestinationPath.exists() && runtimeDestinationPath.isSymbolicLink()) {
-        runtimeDestinationPath.deleteIfExists()
+      if (Files.exists(runtimeDestinationPath) && Files.isSymbolicLink(runtimeDestinationPath)) {
+        Files.deleteIfExists(runtimeDestinationPath)
       }
       val entriesToCopy = listOf("src", "include", "external", "cmake", "make", "CMakeLists.txt")
       FileUtil.copyFilesOrDirectories(
@@ -126,6 +130,18 @@ abstract class UcPlatformGenerator(protected val generator: UcGenerator) {
   }
 
   fun doCompile(context: LFGeneratorContext, onlyGenerateBuildFiles: Boolean = false): Boolean {
+    if (shouldCleanBuildDirectory() && Files.exists(buildPath)) {
+      try {
+        messageReporter.nowhere().info("Cleaning build directory ${buildPath} before compilation.")
+        deletePathRecursively(buildPath)
+      } catch (e: IOException) {
+        messageReporter
+            .nowhere()
+            .warning(
+                "Failed to clean build directory ${buildPath}: ${e.message}. Continuing with existing contents.")
+      }
+    }
+
     // make sure the build directory exists
     Files.createDirectories(buildPath)
 
@@ -253,5 +269,14 @@ abstract class UcPlatformGenerator(protected val generator: UcGenerator) {
         commandFactory.createCommand(
             "cmake", getCmakeArgs(buildPath, outPath, sourcesRoot), buildPath.parent)
     return cmd
+  }
+
+  private fun deletePathRecursively(path: Path) {
+    if (!Files.exists(path)) {
+      return
+    }
+    Files.walk(path).use { stream ->
+      stream.sorted(Comparator.reverseOrder()).forEach { Files.deleteIfExists(it) }
+    }
   }
 }
