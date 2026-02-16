@@ -10,13 +10,15 @@
 
 static PlatformZephyr platform;
 
-void Platform_vprintf(const char* fmt, va_list args) { vprintf(fmt, args); }
+void Platform_vprintf(const char* fmt, va_list args) { vprintk(fmt, args); }
 
 // Catch kernel panics from Zephyr
 void k_sys_fatal_error_handler(unsigned int reason, const struct arch_esf* esf) {
   (void)esf;
   LF_ERR(PLATFORM, "Zephyr kernel panic reason=%d", reason);
-  throw("Zephyr kernel panic");
+  char reason_msg[64];
+  snprintf(reason_msg, sizeof(reason_msg), "Zephyr kernel panic reason=%u", reason);
+  throw(reason_msg);
 }
 
 instant_t PlatformZephyr_get_physical_time(Platform* super) {

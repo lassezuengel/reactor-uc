@@ -2,12 +2,15 @@ package org.lflang.generator.uc
 
 import java.nio.file.Path
 import kotlin.math.max
+import kotlin.collections.buildList
 import org.lflang.generator.ZephyrConfig
 import org.lflang.lf.Instantiation
 import org.lflang.target.TargetConfig
 import org.lflang.target.property.FedNetInterfaceProperty
 import org.lflang.target.property.PlatformProperty
+import org.lflang.target.property.LoggingProperty
 import org.lflang.target.property.type.FedNetInterfaceType.FedNetInterface
+import org.lflang.target.property.type.LoggingType.LogLevel
 import org.lflang.util.FileUtil
 
 /**
@@ -127,8 +130,10 @@ class UcPlatformArtifactGeneratorZephyr(
         .filterIsInstance<UcTcpIpInterface>()
         .map { it.getIpAddress().address }
         .firstOrNull()
-        ?: "fd00::${fedId++}"
-    val maxConnections = maxConnectionsFor(fed).toString()
+        ?: "fd01::${fedId++}"
+
+    val maxConnections = "10"
+    //val axConnections = maxConnectionsFor(fed).toString() // notice that this minimum is too small! Check how many connections we need!
 
     return ZephyrConfig()
         .comment("Lingua Franca Zephyr configuration file")
@@ -140,6 +145,11 @@ class UcPlatformArtifactGeneratorZephyr(
         .property("UART_CONSOLE", "n")
         .property("NET_LOG", "n")
         .property("LOG", "y")
+        .heading("Diagnostics and logging")
+        .property("LOG_BACKEND_RTT", "y")
+        .property("LOG_MODE_IMMEDIATE", "y")
+        .property("LOG_PROCESS_THREAD", "n")
+        .property("LOG_DEFAULT_LEVEL", zephyrLogDefaultLevel())
         .heading("POSIX sockets and networking")
         .property("NETWORKING", "y")
         .property("NET_IPV6", "y")
@@ -149,15 +159,16 @@ class UcPlatformArtifactGeneratorZephyr(
         .property("POSIX_API", "y")
         .property("NET_SOCKETS_POSIX_NAMES", "y")
         .heading("Network buffers")
-        .property("NET_PKT_RX_COUNT", "16")
-        .property("NET_PKT_TX_COUNT", "16")
-        .property("NET_BUF_RX_COUNT", "64")
-        .property("NET_BUF_TX_COUNT", "64")
+        .property("NET_PKT_RX_COUNT", "8")
+        .property("NET_PKT_TX_COUNT", "8")
+        .property("NET_BUF_RX_COUNT", "16")
+        .property("NET_BUF_TX_COUNT", "16")
         .property("NET_CONTEXT_NET_PKT_POOL", "y")
         .heading("IP address options")
         .property("NET_IF_UNICAST_IPV6_ADDR_COUNT", "3")
         .property("NET_IF_MCAST_IPV6_ADDR_COUNT", "4")
-        .property("NET_MAX_CONTEXTS", "10")
+        .property("NET_MAX_CONTEXTS", "6")
+        .property("NET_MAX_CONN", maxConnections)
         .heading("Network shell")
         .property("NET_SHELL", "y")
         .property("SHELL", "y")
@@ -166,12 +177,14 @@ class UcPlatformArtifactGeneratorZephyr(
         .property("NET_CONFIG_NEED_IPV4", "n")
         .property("NET_CONFIG_NEED_IPV6", "y")
         .property("NET_CONFIG_MY_IPV6_ADDR", "\"$devIpv6\"")
+        .property_if(devIpv6 == "fd01::2", "NET_CONFIG_PEER_IPV6_ADDR", "\"fd01::1\"")
         .property("NET_MAX_CONN", maxConnections)
         .property("ZVFS_OPEN_MAX", "16")
         .property("NET_IF_MAX_IPV6_COUNT", "2")
         .heading("IEEE802.15.4 6LoWPAN")
         .property("BT", "n")
         .property("NET_UDP", "y")
+        // .property("NET_SOCKETS_OFFLOAD", "y") // Do we need this for 6lowpan, or only for Ethernet?
         .property("NET_IPV4", "n")
         .property("NET_L2_IEEE802154_FRAGMENT_REASS_CACHE_SIZE", "8")
         .property("NET_CONFIG_MY_IPV4_ADDR", "\"\"")
@@ -182,10 +195,25 @@ class UcPlatformArtifactGeneratorZephyr(
         .property("NET_IPV6_NBR_CACHE", "n")
         .property("NET_CONFIG_IEEE802154_CHANNEL", "26")
         .heading("Additional system configuration")
-        .property("SYSTEM_WORKQUEUE_STACK_SIZE", "4096")
-        .property("MAIN_STACK_SIZE", "8192")
+        .property("FAULT_DUMP", "2")
+        .property("EXCEPTION_DEBUG", "y")
+        .property("SYSTEM_WORKQUEUE_STACK_SIZE", "8192")
+        .property("MAIN_STACK_SIZE", "16384")
+        .property("HEAP_MEM_POOL_SIZE", "8192")
         .property("THREAD_CUSTOM_DATA", "y")
+        .property("THREAD_STACK_INFO", "y")
+        .property("THREAD_MONITOR", "y")
         .generateOutput()
+  }
+
+  private fun zephyrLogDefaultLevel(): String {
+    return when (targetConfig.getOrDefault(LoggingProperty.INSTANCE)) {
+      LogLevel.ERROR -> "1"
+      LogLevel.WARN -> "2"
+      LogLevel.INFO -> "3"
+      LogLevel.LOG -> "3"
+      LogLevel.DEBUG -> "4"
+    }
   }
 
   private fun projectName(): String =
@@ -195,10 +223,13 @@ class UcPlatformArtifactGeneratorZephyr(
       }
 
   private fun additionalVariables(): List<String> =
-      when (val ctx = context) {
-        is UcGeneratorFactory.PlatformContext.Federated ->
-            listOf("set(FEDERATE ${ctx.federate.name})")
-        UcGeneratorFactory.PlatformContext.Standalone -> emptyList()
+      buildList {
+        val logLevel =
+            "set(LOG_LEVEL LF_LOG_LEVEL_${targetConfig.getOrDefault(LoggingProperty.INSTANCE).name.uppercase()})"
+        add(logLevel)
+        if (context is UcGeneratorFactory.PlatformContext.Federated) {
+          add("set(FEDERATE ${context.federate.name})")
+        }
       }
 
   private fun maxConnectionsFor(fed: UcGeneratorFactory.PlatformContext.Federated): Int =
