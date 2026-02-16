@@ -69,6 +69,7 @@ class UcPlatformArtifactGeneratorZephyr(
         }
 
     FileUtil.writeToFile(prjConf, projectRoot.resolve("prj.conf"))
+    FileUtil.writeToFile(generateKconfig(), projectRoot.resolve("Kconfig"))
   }
 
   /**
@@ -87,6 +88,9 @@ class UcPlatformArtifactGeneratorZephyr(
         |CONFIG_POSIX_API=y
         |CONFIG_MAIN_STACK_SIZE=16384
         |CONFIG_HEAP_MEM_POOL_SIZE=1024
+        |CONFIG_LF_TCP_IP_CHANNEL_STACK_SIZE=4096
+        |CONFIG_LF_TCP_IP_CHANNEL_THREAD_PREEMPT_LEVEL=0
+        |CONFIG_LF_TCP_IP_CHANNEL_THREAD_NAME="lf_tcpip_rx"
       """
           .trimMargin()
 
@@ -110,6 +114,9 @@ class UcPlatformArtifactGeneratorZephyr(
         |CONFIG_POSIX_API=y
         |CONFIG_MAIN_STACK_SIZE=16384
         |CONFIG_HEAP_MEM_POOL_SIZE=1024
+        |CONFIG_LF_TCP_IP_CHANNEL_STACK_SIZE=4096
+        |CONFIG_LF_TCP_IP_CHANNEL_THREAD_PREEMPT_LEVEL=0
+        |CONFIG_LF_TCP_IP_CHANNEL_THREAD_NAME="lf_tcpip_rx"
         |
         |# Network address config
         |CONFIG_NET_CONFIG_SETTINGS=y
@@ -171,6 +178,9 @@ class UcPlatformArtifactGeneratorZephyr(
         .property("NET_MAX_CONN", maxConnections)
         .property("ZVFS_OPEN_MAX", "16")
         .property("NET_IF_MAX_IPV6_COUNT", "2")
+        .property("LF_TCP_IP_CHANNEL_STACK_SIZE", "4096")
+        .property("LF_TCP_IP_CHANNEL_THREAD_PREEMPT_LEVEL", "0")
+        .property("LF_TCP_IP_CHANNEL_THREAD_NAME", "\"lf_tcpip_rx\"")
         .heading("IEEE802.15.4 6LoWPAN")
         .property("BT", "n")
         .property("NET_UDP", "y")
@@ -189,6 +199,40 @@ class UcPlatformArtifactGeneratorZephyr(
         .property("THREAD_CUSTOM_DATA", "y") // TODO: I don't think we need this
         .generateOutput()
   }
+
+  private fun generateKconfig(): String =
+      """
+        |source "Kconfig.zephyr"
+        |
+        |menu "Lingua Franca settings"
+        |
+        |config LF_TCP_IP_CHANNEL_STACK_SIZE
+        |  int "TCP/IP channel worker stack size"
+        |  default 4096
+        |  help
+        |    Stack size in bytes allocated for the Lingua Franca TCP/IP receive worker thread.
+        |
+        |config LF_TCP_IP_CHANNEL_STACK_GUARD
+        |  int "TCP/IP channel worker POSIX guard"
+        |  default 128
+        |  help
+        |    Guard region size (bytes) reserved when the TCP/IP worker uses the POSIX pthread implementation.
+        |
+        |config LF_TCP_IP_CHANNEL_THREAD_PREEMPT_LEVEL
+        |  int "TCP/IP channel worker preempt priority"
+        |  default 0
+        |  help
+        |    Preemptible priority level passed to K_PRIO_PREEMPT() for the TCP/IP worker thread.
+        |
+        |config LF_TCP_IP_CHANNEL_THREAD_NAME
+        |  string "TCP/IP channel worker thread name"
+        |  default "lf_tcpip_rx"
+        |  help
+        |    Optional Zephyr thread name used for kernel tracing and debug output.
+        |
+        |endmenu
+      """
+          .trimMargin()
 
   private fun projectName(): String =
       when (val ctx = context) {
@@ -220,6 +264,7 @@ class UcPlatformArtifactGeneratorZephyr(
     builder.appendLine("set(LF_MAIN ${mainDef.name})")
     builder.appendLine("set(LF_MAIN_TARGET ${mainTargetName})")
     builder.appendLine("set(PROJECT_ROOT ${projectRoot}/..)")
+    builder.appendLine("set(KCONFIG_ROOT ${'$'}{CMAKE_CURRENT_SOURCE_DIR}/Kconfig)")
     additionalVariables.forEach { builder.appendLine(it) }
     builder.appendLine()
     if (createMainTarget) {
