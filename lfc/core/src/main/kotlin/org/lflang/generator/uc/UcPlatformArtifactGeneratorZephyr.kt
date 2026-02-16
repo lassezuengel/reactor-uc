@@ -198,10 +198,10 @@ class UcPlatformArtifactGeneratorZephyr(
         .property("MAIN_STACK_SIZE", "8192")
         .property("THREAD_CUSTOM_DATA", "y") // TODO: I don't think we need this
         .heading("Threads and Debugging")
-        .property("CONFIG_THREAD_NAME", "y")
-        .property("CONFIG_LF_TCP_IP_CHANNEL_STACK_SIZE", "4096")
-        .property("CONFIG_LF_TCP_IP_CHANNEL_THREAD_PREEMPT_LEVEL", "0")
-        .property("CONFIG_LF_TCP_IP_CHANNEL_THREAD_NAME", "\"lf_tcpip_\"")
+        .property("THREAD_NAME", "y")
+        .property("LF_TCP_IP_CHANNEL_STACK_SIZE", "4096")
+        .property("LF_TCP_IP_CHANNEL_THREAD_PREEMPT_LEVEL", "0")
+        .property("LF_TCP_IP_CHANNEL_THREAD_NAME", "\"lf_tcpip_runner\"")
         .generateOutput()
   }
 
