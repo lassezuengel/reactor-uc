@@ -136,6 +136,8 @@ class UcPlatformArtifactGeneratorZephyr(
         .blank()
         .property("PRINTK", "y")
         .property("USE_SEGGER_RTT", "y")
+        .property("LOG_BACKEND_RTT", "y")
+        .property("DEBUG_INFO", "y")
         .property("RTT_CONSOLE", "y")
         .property("UART_CONSOLE", "n")
         .property("NET_LOG", "n")
@@ -147,7 +149,7 @@ class UcPlatformArtifactGeneratorZephyr(
         .property("NET_SOCKETS", "y")
         .property("NET_CONNECTION_MANAGER", "y")
         .property("POSIX_API", "y")
-        .property("NET_SOCKETS_POSIX_NAMES", "y")
+        // .property("NET_SOCKETS_POSIX_NAMES", "y") // TODO: I don't think we need this in Zephyr 3.7.0, and Zephyr 4.1.0 doesn't support it at all!
         .heading("Network buffers")
         .property("NET_PKT_RX_COUNT", "16")
         .property("NET_PKT_TX_COUNT", "16")
@@ -184,7 +186,7 @@ class UcPlatformArtifactGeneratorZephyr(
         .heading("Additional system configuration")
         .property("SYSTEM_WORKQUEUE_STACK_SIZE", "4096")
         .property("MAIN_STACK_SIZE", "8192")
-        .property("THREAD_CUSTOM_DATA", "y")
+        .property("THREAD_CUSTOM_DATA", "y") // TODO: I don't think we need this
         .generateOutput()
   }
 
