@@ -41,6 +41,9 @@
 // Forward declarations
 static void* _TcpIpChannel_worker_thread(void* untyped_self);
 
+/**
+ * @brief Fill a `sockaddr_storage` based on the host and protocol family of the channel.
+ */
 static lf_ret_t _TcpIpChannel_fill_sockaddr(TcpIpChannel* self, struct sockaddr_storage* storage,
                                             socklen_t* addrlen) {
   memset(storage, 0, sizeof(*storage));
@@ -320,10 +323,10 @@ static lf_ret_t TcpIpChannel_send_blocking(NetworkChannel* untyped_self, const F
 
       while (bytes_written < message_size && timeout > 0) {
         TCP_IP_CHANNEL_DEBUG("Sending %d bytes", message_size - bytes_written);
-        ssize_t bytes_send = send(socket, self->write_buffer + bytes_written, message_size - bytes_written, 0);
-        TCP_IP_CHANNEL_DEBUG("%d bytes sent", bytes_send);
+        ssize_t bytes_sent = send(socket, self->write_buffer + bytes_written, message_size - bytes_written, 0);
+        TCP_IP_CHANNEL_DEBUG("%d bytes sent", bytes_sent);
 
-        if (bytes_send < 0) {
+        if (bytes_sent < 0) {
           TCP_IP_CHANNEL_ERR("Write failed errno=%d", errno);
           switch (errno) {
           case ETIMEDOUT:
@@ -339,13 +342,13 @@ static lf_ret_t TcpIpChannel_send_blocking(NetworkChannel* untyped_self, const F
             lf_ret = LF_ERR;
           }
         } else {
-          bytes_written += bytes_send;
+          bytes_written += bytes_sent;
           timeout--;
           lf_ret = LF_OK;
         }
       }
 
-      // checking if the whole message was transmitted or timeout was received
+      // checking if the whole message was transmitted or timeout was reached
       if (timeout == 0 || bytes_written < message_size) {
         TCP_IP_CHANNEL_ERR("Timeout on sending message");
         lf_ret = LF_ERR;
