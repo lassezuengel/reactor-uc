@@ -16,6 +16,10 @@
 #include <unistd.h>
 #include <pthread.h>
 
+#ifdef PLATFORM_ZEPHYR
+#include <zephyr/kernel.h>
+#endif
+
 // For native execution on Linux or macOS we also catch SIGPIPE signals
 #ifdef PLATFORM_POSIX
 #include <signal.h>
@@ -39,8 +43,36 @@
   LF_DEBUG(NET, "TcpIpChannel: [%s] " fmt, self->is_server ? "server" : "client", ##__VA_ARGS__)
 
 // Forward declarations
-static void* _TcpIpChannel_worker_thread(void* untyped_self);
+#ifdef PLATFORM_ZEPHYR
+#ifdef CONFIG_LF_TCP_IP_CHANNEL_THREAD_PREEMPT_LEVEL
+#define TCP_IP_CHANNEL_ZEPHYR_THREAD_PRIORITY K_PRIO_PREEMPT(CONFIG_LF_TCP_IP_CHANNEL_THREAD_PREEMPT_LEVEL)
+#else
+#define TCP_IP_CHANNEL_ZEPHYR_THREAD_PRIORITY K_PRIO_PREEMPT(0)
+#endif
 
+#ifndef CONFIG_LF_TCP_IP_CHANNEL_THREAD_OPTIONS
+#define TCP_IP_CHANNEL_ZEPHYR_THREAD_OPTIONS 0
+#else
+#define TCP_IP_CHANNEL_ZEPHYR_THREAD_OPTIONS CONFIG_LF_TCP_IP_CHANNEL_THREAD_OPTIONS
+#endif
+
+#ifndef CONFIG_LF_TCP_IP_CHANNEL_THREAD_NAME
+#define TCP_IP_CHANNEL_ZEPHYR_THREAD_NAME "lf_tcpip_rx"
+#else
+#define TCP_IP_CHANNEL_ZEPHYR_THREAD_NAME CONFIG_LF_TCP_IP_CHANNEL_THREAD_NAME
+#endif
+#endif
+
+static void _TcpIpChannel_worker_main(void* untyped_self);
+#ifndef PLATFORM_ZEPHYR
+static void* _TcpIpChannel_worker_thread(void* untyped_self);
+#else
+static void _TcpIpChannel_worker_thread(void* p1, void* p2, void* p3);
+#endif
+
+/**
+ * @brief Fill a `sockaddr_storage` based on the host and protocol family of the channel.
+ */
 static lf_ret_t _TcpIpChannel_fill_sockaddr(TcpIpChannel* self, struct sockaddr_storage* storage,
                                             socklen_t* addrlen) {
   memset(storage, 0, sizeof(*storage));
@@ -153,9 +185,21 @@ static lf_ret_t _TcpIpChannel_reset_socket(TcpIpChannel* self) {
 }
 
 static void _TcpIpChannel_spawn_worker_thread(TcpIpChannel* self) {
-  int res;
   TCP_IP_CHANNEL_DEBUG("Spawning worker thread");
 
+#ifdef PLATFORM_ZEPHYR
+  self->worker_thread_id =
+      k_thread_create(&self->worker_thread, self->worker_thread_stack,
+                      K_KERNEL_STACK_SIZEOF(self->worker_thread_stack), _TcpIpChannel_worker_thread, self, NULL,
+                      NULL, TCP_IP_CHANNEL_ZEPHYR_THREAD_PRIORITY, TCP_IP_CHANNEL_ZEPHYR_THREAD_OPTIONS, K_NO_WAIT);
+
+  if (self->worker_thread_id == NULL) {
+    throw("k_thread_create failed");
+  }
+
+  (void)k_thread_name_set(self->worker_thread_id, TCP_IP_CHANNEL_ZEPHYR_THREAD_NAME);
+#else
+  int res;
   memset(&self->worker_thread_stack, 0, TCP_IP_CHANNEL_RECV_THREAD_STACK_SIZE);
   if (pthread_attr_init(&self->worker_thread_attr) != 0) {
     throw("pthread_attr_init failed");
@@ -169,6 +213,9 @@ static void _TcpIpChannel_spawn_worker_thread(TcpIpChannel* self) {
   if (res < 0) {
     throw("pthread_create failed");
   }
+#endif
+
+  self->worker_thread_started = true;
 }
 
 static lf_ret_t _TcpIpChannel_server_bind(TcpIpChannel* self) {
@@ -320,10 +367,10 @@ static lf_ret_t TcpIpChannel_send_blocking(NetworkChannel* untyped_self, const F
 
       while (bytes_written < message_size && timeout > 0) {
         TCP_IP_CHANNEL_DEBUG("Sending %d bytes", message_size - bytes_written);
-        ssize_t bytes_send = send(socket, self->write_buffer + bytes_written, message_size - bytes_written, 0);
-        TCP_IP_CHANNEL_DEBUG("%d bytes sent", bytes_send);
+        ssize_t bytes_sent = send(socket, self->write_buffer + bytes_written, message_size - bytes_written, 0);
+        TCP_IP_CHANNEL_DEBUG("%d bytes sent", bytes_sent);
 
-        if (bytes_send < 0) {
+        if (bytes_sent < 0) {
           TCP_IP_CHANNEL_ERR("Write failed errno=%d", errno);
           switch (errno) {
           case ETIMEDOUT:
@@ -339,13 +386,13 @@ static lf_ret_t TcpIpChannel_send_blocking(NetworkChannel* untyped_self, const F
             lf_ret = LF_ERR;
           }
         } else {
-          bytes_written += bytes_send;
+          bytes_written += bytes_sent;
           timeout--;
           lf_ret = LF_OK;
         }
       }
 
-      // checking if the whole message was transmitted or timeout was received
+      // checking if the whole message was transmitted or timeout was reached
       if (timeout == 0 || bytes_written < message_size) {
         TCP_IP_CHANNEL_ERR("Timeout on sending message");
         lf_ret = LF_ERR;
@@ -451,8 +498,8 @@ static void TcpIpChannel_close_connection(NetworkChannel* untyped_self) {
 /**
  * @brief Main loop of the TcpIpChannel.
  */
-static void* _TcpIpChannel_worker_thread(void* untyped_self) {
-  TcpIpChannel* self = untyped_self;
+static void _TcpIpChannel_worker_main(void* untyped_self) {
+  TcpIpChannel* self = (TcpIpChannel*)untyped_self;
   lf_ret_t ret;
   int res;
 
@@ -460,7 +507,9 @@ static void* _TcpIpChannel_worker_thread(void* untyped_self) {
 
   while (true) {
     // Check if we have any pending cancel requests from the runtime.
+#ifndef PLATFORM_ZEPHYR
     pthread_testcancel();
+#endif
 
     // Main state machine.
     switch (_TcpIpChannel_get_state(self)) {
@@ -472,9 +521,9 @@ static void* _TcpIpChannel_worker_thread(void* untyped_self) {
           _TcpIpChannel_update_state(self, NETWORK_CHANNEL_STATE_CONNECTION_FAILED);
           break;
         }
-        _TcpIpChannel_try_connect_server(untyped_self);
+        _TcpIpChannel_try_connect_server((NetworkChannel*)self);
       } else {
-        _TcpIpChannel_try_connect_client(untyped_self);
+        _TcpIpChannel_try_connect_client((NetworkChannel*)self);
       }
     } break;
 
@@ -525,7 +574,7 @@ static void* _TcpIpChannel_worker_thread(void* untyped_self) {
         TCP_IP_CHANNEL_DEBUG("Select -> receive");
         bool has_data = true;
         while (has_data) {
-          ret = _TcpIpChannel_receive(untyped_self, &self->output);
+          ret = _TcpIpChannel_receive((NetworkChannel*)self, &self->output);
           has_data = false;
           if (ret == LF_NETWORK_CHANNEL_EMPTY) {
             /* The non-blocking recv has no new data yet */
@@ -553,8 +602,20 @@ static void* _TcpIpChannel_worker_thread(void* untyped_self) {
   }
 
   TCP_IP_CHANNEL_INFO("Worker thread terminates");
+}
+
+#ifndef PLATFORM_ZEPHYR
+static void* _TcpIpChannel_worker_thread(void* untyped_self) {
+  _TcpIpChannel_worker_main(untyped_self);
   return NULL;
 }
+#else
+static void _TcpIpChannel_worker_thread(void* p1, void* p2, void* p3) {
+  (void)p2;
+  (void)p3;
+  _TcpIpChannel_worker_main(p1);
+}
+#endif
 
 static void TcpIpChannel_register_receive_callback(NetworkChannel* untyped_self,
                                                    void (*receive_callback)(FederatedConnectionBundle* conn,
@@ -568,38 +629,46 @@ static void TcpIpChannel_register_receive_callback(NetworkChannel* untyped_self,
 
 static void TcpIpChannel_free(NetworkChannel* untyped_self) {
   TcpIpChannel* self = (TcpIpChannel*)untyped_self;
-  int err = 0;
   TCP_IP_CHANNEL_DEBUG("Free");
-  validate(self->worker_thread != 0);
+  if (!self->worker_thread_started) {
+    self->super.close_connection((NetworkChannel*)self);
+    pthread_mutex_destroy(&self->mutex);
+    return;
+  }
 
-  // The order in which we do the operations is important. We want to cancel and stop the thread before we close the
-  // sockets.
+  self->worker_thread_started = false;
 
+  // The order in which we do the operations is important. We want to stop the thread before we close sockets.
   TCP_IP_CHANNEL_DEBUG("Stopping worker thread");
 
-  // 1. We cancel the thread. This will wake it up from any blocking calls and should
-  //  make it terminate.
-  err = pthread_cancel(self->worker_thread);
+#ifdef PLATFORM_ZEPHYR
+  k_thread_abort(self->worker_thread_id);
+  int join_err = k_thread_join(&self->worker_thread, K_FOREVER);
+  if (join_err != 0) {
+    TCP_IP_CHANNEL_ERR("Error joining worker thread %d", join_err);
+  }
+  self->worker_thread_id = NULL;
+#else
+  int err = pthread_cancel(self->worker_thread);
 
   if (err != 0) {
     TCP_IP_CHANNEL_ERR("Error canceling worker thread %d", err);
   }
 
-  // 2. We join on the thread. This will block until the cancellation has succeeded. Thus
-  //  it is important that the worker thread never does any uncancellable blocking.
   err = pthread_join(self->worker_thread, NULL);
   if (err != 0) {
     TCP_IP_CHANNEL_ERR("Error joining worker thread %d", err);
   }
 
-  // 3. We clean up and close all sockets and file descriptors.
-  self->super.close_connection((NetworkChannel*)self);
-
-  // 4. Free up any memory etc. of the thread.
+  // Free up any memory etc. of the thread.
   err = pthread_attr_destroy(&self->worker_thread_attr);
   if (err != 0) {
     TCP_IP_CHANNEL_ERR("Error destroying pthread attr %d", err);
   }
+#endif
+
+  // Clean up and close all sockets and file descriptors.
+  self->super.close_connection((NetworkChannel*)self);
 
   pthread_mutex_destroy(&self->mutex);
 }
@@ -645,8 +714,13 @@ void TcpIpChannel_ctor(TcpIpChannel* self, const char* host, unsigned short port
   self->super.mode = NETWORK_CHANNEL_MODE_ASYNC;
   self->receive_callback = NULL;
   self->federated_connection = NULL;
-  self->worker_thread = 0;
   self->has_warned_about_connection_failure = false;
+  self->worker_thread_started = false;
+#ifdef PLATFORM_ZEPHYR
+  self->worker_thread_id = NULL;
+#else
+  self->worker_thread = 0;
+#endif
 
   _TcpIpChannel_reset_socket(self);
   _TcpIpChannel_spawn_worker_thread(self);

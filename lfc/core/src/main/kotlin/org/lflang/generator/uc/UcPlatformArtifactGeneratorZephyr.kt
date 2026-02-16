@@ -72,6 +72,7 @@ class UcPlatformArtifactGeneratorZephyr(
         }
 
     FileUtil.writeToFile(prjConf, projectRoot.resolve("prj.conf"))
+    FileUtil.writeToFile(generateKconfig(), projectRoot.resolve("Kconfig"))
   }
 
   /**
@@ -90,6 +91,9 @@ class UcPlatformArtifactGeneratorZephyr(
         |CONFIG_POSIX_API=y
         |CONFIG_MAIN_STACK_SIZE=16384
         |CONFIG_HEAP_MEM_POOL_SIZE=1024
+        |CONFIG_LF_TCP_IP_CHANNEL_STACK_SIZE=4096
+        |CONFIG_LF_TCP_IP_CHANNEL_THREAD_PREEMPT_LEVEL=0
+        |CONFIG_LF_TCP_IP_CHANNEL_THREAD_NAME="lf_tcpip_rx"
       """
           .trimMargin()
 
@@ -113,6 +117,9 @@ class UcPlatformArtifactGeneratorZephyr(
         |CONFIG_POSIX_API=y
         |CONFIG_MAIN_STACK_SIZE=16384
         |CONFIG_HEAP_MEM_POOL_SIZE=1024
+        |CONFIG_LF_TCP_IP_CHANNEL_STACK_SIZE=4096
+        |CONFIG_LF_TCP_IP_CHANNEL_THREAD_PREEMPT_LEVEL=0
+        |CONFIG_LF_TCP_IP_CHANNEL_THREAD_NAME="lf_tcpip_rx"
         |
         |# Network address config
         |CONFIG_NET_CONFIG_SETTINGS=y
@@ -141,6 +148,8 @@ class UcPlatformArtifactGeneratorZephyr(
         .blank()
         .property("PRINTK", "y")
         .property("USE_SEGGER_RTT", "y")
+        .property("LOG_BACKEND_RTT", "y")
+        .property("DEBUG_INFO", "y")
         .property("RTT_CONSOLE", "y")
         .property("UART_CONSOLE", "n")
         .property("NET_LOG", "n")
@@ -149,7 +158,7 @@ class UcPlatformArtifactGeneratorZephyr(
         .property("LOG_BACKEND_RTT", "y")
         .property("LOG_MODE_IMMEDIATE", "y")
         .property("LOG_PROCESS_THREAD", "n")
-        .property("LOG_DEFAULT_LEVEL", zephyrLogDefaultLevel())
+        // .property("LOG_DEFAULT_LEVEL", zephyrLogDefaultLevel())
         .heading("POSIX sockets and networking")
         .property("NETWORKING", "y")
         .property("NET_IPV6", "y")
@@ -157,7 +166,7 @@ class UcPlatformArtifactGeneratorZephyr(
         .property("NET_SOCKETS", "y")
         .property("NET_CONNECTION_MANAGER", "y")
         .property("POSIX_API", "y")
-        .property("NET_SOCKETS_POSIX_NAMES", "y")
+        // .property("NET_SOCKETS_POSIX_NAMES", "y") // TODO: I don't think we need this in Zephyr 3.7.0, and Zephyr 4.1.0 doesn't support it at all!
         .heading("Network buffers")
         .property("NET_PKT_RX_COUNT", "8")
         .property("NET_PKT_TX_COUNT", "8")
@@ -195,14 +204,9 @@ class UcPlatformArtifactGeneratorZephyr(
         .property("NET_IPV6_NBR_CACHE", "n")
         .property("NET_CONFIG_IEEE802154_CHANNEL", "26")
         .heading("Additional system configuration")
-        .property("FAULT_DUMP", "2")
-        .property("EXCEPTION_DEBUG", "y")
-        .property("SYSTEM_WORKQUEUE_STACK_SIZE", "8192")
-        .property("MAIN_STACK_SIZE", "16384")
-        .property("HEAP_MEM_POOL_SIZE", "8192")
+        .property("SYSTEM_WORKQUEUE_STACK_SIZE", "4096")
+        .property("MAIN_STACK_SIZE", "8192")
         .property("THREAD_CUSTOM_DATA", "y")
-        .property("THREAD_STACK_INFO", "y")
-        .property("THREAD_MONITOR", "y")
         .generateOutput()
   }
 
@@ -215,6 +219,40 @@ class UcPlatformArtifactGeneratorZephyr(
       LogLevel.DEBUG -> "4"
     }
   }
+
+  private fun generateKconfig(): String =
+      """
+        |source "Kconfig.zephyr"
+        |
+        |menu "Lingua Franca settings"
+        |
+        |config LF_TCP_IP_CHANNEL_STACK_SIZE
+        |  int "TCP/IP channel worker stack size"
+        |  default 4096
+        |  help
+        |    Stack size in bytes allocated for the Lingua Franca TCP/IP receive worker thread.
+        |
+        |config LF_TCP_IP_CHANNEL_STACK_GUARD
+        |  int "TCP/IP channel worker POSIX guard"
+        |  default 128
+        |  help
+        |    Guard region size (bytes) reserved when the TCP/IP worker uses the POSIX pthread implementation.
+        |
+        |config LF_TCP_IP_CHANNEL_THREAD_PREEMPT_LEVEL
+        |  int "TCP/IP channel worker preempt priority"
+        |  default 0
+        |  help
+        |    Preemptible priority level passed to K_PRIO_PREEMPT() for the TCP/IP worker thread.
+        |
+        |config LF_TCP_IP_CHANNEL_THREAD_NAME
+        |  string "TCP/IP channel worker thread name"
+        |  default "lf_tcpip_rx"
+        |  help
+        |    Optional Zephyr thread name used for kernel tracing and debug output.
+        |
+        |endmenu
+      """
+          .trimMargin()
 
   private fun projectName(): String =
       when (val ctx = context) {
@@ -249,6 +287,7 @@ class UcPlatformArtifactGeneratorZephyr(
     builder.appendLine("set(LF_MAIN ${mainDef.name})")
     builder.appendLine("set(LF_MAIN_TARGET ${mainTargetName})")
     builder.appendLine("set(PROJECT_ROOT ${projectRoot}/..)")
+    builder.appendLine("set(KCONFIG_ROOT ${'$'}{CMAKE_CURRENT_SOURCE_DIR}/Kconfig)")
     additionalVariables.forEach { builder.appendLine(it) }
     builder.appendLine()
     if (createMainTarget) {

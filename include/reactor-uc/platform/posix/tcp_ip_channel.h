@@ -5,6 +5,10 @@
 #include <sys/select.h>
 #include <sys/socket.h>
 
+#ifdef PLATFORM_ZEPHYR
+#include <zephyr/kernel.h>
+#endif
+
 #include "proto/message.pb.h"
 #include "reactor-uc/error.h"
 #include "reactor-uc/network_channel.h"
@@ -14,8 +18,24 @@
 #define TCP_IP_CHANNEL_WORKER_THREAD_MAIN_LOOP_SLEEP MSEC(100)
 #define TCP_IP_CHANNEL_BUFFERSIZE 1024
 #define TCP_IP_CHANNEL_NUM_RETRIES 255
+
+#ifndef TCP_IP_CHANNEL_RECV_THREAD_STACK_SIZE
 #define TCP_IP_CHANNEL_RECV_THREAD_STACK_SIZE 2048
+#endif
+
+#ifndef TCP_IP_CHANNEL_RECV_THREAD_STACK_GUARD_SIZE
 #define TCP_IP_CHANNEL_RECV_THREAD_STACK_GUARD_SIZE 128
+#endif
+
+#ifdef CONFIG_LF_TCP_IP_CHANNEL_STACK_SIZE
+#undef TCP_IP_CHANNEL_RECV_THREAD_STACK_SIZE
+#define TCP_IP_CHANNEL_RECV_THREAD_STACK_SIZE CONFIG_LF_TCP_IP_CHANNEL_STACK_SIZE
+#endif
+
+#ifdef CONFIG_LF_TCP_IP_CHANNEL_STACK_GUARD
+#undef TCP_IP_CHANNEL_RECV_THREAD_STACK_GUARD_SIZE
+#define TCP_IP_CHANNEL_RECV_THREAD_STACK_GUARD_SIZE CONFIG_LF_TCP_IP_CHANNEL_STACK_GUARD
+#endif
 
 typedef struct TcpIpChannel TcpIpChannel;
 typedef struct FederatedConnectionBundle FederatedConnectionBundle;
@@ -43,9 +63,16 @@ struct TcpIpChannel {
   bool has_warned_about_connection_failure;
 
   // required for callbacks
+  bool worker_thread_started;
+#ifdef PLATFORM_ZEPHYR
+  struct k_thread worker_thread;
+  k_tid_t worker_thread_id;
+  K_KERNEL_STACK_MEMBER(worker_thread_stack, TCP_IP_CHANNEL_RECV_THREAD_STACK_SIZE);
+#else
   pthread_t worker_thread;
   pthread_attr_t worker_thread_attr;
   char worker_thread_stack[TCP_IP_CHANNEL_RECV_THREAD_STACK_SIZE];
+#endif
 
   FederatedConnectionBundle* federated_connection;
   void (*receive_callback)(FederatedConnectionBundle* conn, const FederateMessage* message);
