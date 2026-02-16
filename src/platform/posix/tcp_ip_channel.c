@@ -197,9 +197,7 @@ static void _TcpIpChannel_spawn_worker_thread(TcpIpChannel* self) {
     throw("k_thread_create failed");
   }
 
-#if defined(CONFIG_THREAD_NAME)
   (void)k_thread_name_set(self->worker_thread_id, TCP_IP_CHANNEL_ZEPHYR_THREAD_NAME);
-#endif
 #else
   int res;
   memset(&self->worker_thread_stack, 0, TCP_IP_CHANNEL_RECV_THREAD_STACK_SIZE);
