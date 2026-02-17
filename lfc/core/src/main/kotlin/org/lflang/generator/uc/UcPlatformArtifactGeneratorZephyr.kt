@@ -152,13 +152,10 @@ class UcPlatformArtifactGeneratorZephyr(
         .property("DEBUG_INFO", "y")
         .property("RTT_CONSOLE", "y")
         .property("UART_CONSOLE", "n")
-        .property("NET_LOG", "n")
+        .property("LOG_MODE_IMMEDIATE", "y")
         .property("LOG", "y")
         .heading("Diagnostics and logging")
-        .property("LOG_BACKEND_RTT", "y")
-        .property("LOG_MODE_IMMEDIATE", "y")
         .property("LOG_PROCESS_THREAD", "n")
-        // .property("LOG_DEFAULT_LEVEL", zephyrLogDefaultLevel())
         .heading("POSIX sockets and networking")
         .property("NETWORKING", "y")
         .property("NET_IPV6", "y")
@@ -166,7 +163,6 @@ class UcPlatformArtifactGeneratorZephyr(
         .property("NET_SOCKETS", "y")
         .property("NET_CONNECTION_MANAGER", "y")
         .property("POSIX_API", "y")
-        // .property("NET_SOCKETS_POSIX_NAMES", "y") // TODO: I don't think we need this in Zephyr 3.7.0, and Zephyr 4.1.0 doesn't support it at all!
         .heading("Network buffers")
         .property("NET_PKT_RX_COUNT", "8")
         .property("NET_PKT_TX_COUNT", "8")
@@ -193,7 +189,6 @@ class UcPlatformArtifactGeneratorZephyr(
         .heading("IEEE802.15.4 6LoWPAN")
         .property("BT", "n")
         .property("NET_UDP", "y")
-        // .property("NET_SOCKETS_OFFLOAD", "y") // Do we need this for 6lowpan, or only for Ethernet?
         .property("NET_IPV4", "n")
         .property("NET_L2_IEEE802154_FRAGMENT_REASS_CACHE_SIZE", "8")
         .property("NET_CONFIG_MY_IPV4_ADDR", "\"\"")
@@ -207,6 +202,8 @@ class UcPlatformArtifactGeneratorZephyr(
         .property("SYSTEM_WORKQUEUE_STACK_SIZE", "4096")
         .property("MAIN_STACK_SIZE", "8192")
         .property("THREAD_CUSTOM_DATA", "y")
+        .property("ASSERT", "y")
+        .property("ASSERT_LEVEL", "2")
         .generateOutput()
   }
 
@@ -217,6 +214,7 @@ class UcPlatformArtifactGeneratorZephyr(
       LogLevel.INFO -> "3"
       LogLevel.LOG -> "3"
       LogLevel.DEBUG -> "4"
+      null -> "3" // Default to INFO if not set (reasonable default)
     }
   }
 
