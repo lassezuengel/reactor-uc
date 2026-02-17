@@ -54,7 +54,7 @@ class UcPlatformArtifactGeneratorZephyr(
             additionalVariables = additionalVariables())
     FileUtil.writeToFile(cmake, projectRoot.resolve("CMakeLists.txt"))
 
-    val prjConf =
+    var prjConf =
         """
             |CONFIG_ETH_NATIVE_POSIX=n
             |CONFIG_NET_DRIVERS=y
@@ -74,6 +74,31 @@ class UcPlatformArtifactGeneratorZephyr(
             |CONFIG_NET_NATIVE_OFFLOADED_SOCKETS=y
         """
             .trimMargin()
+
+    val boardName = platformOptions.board().value()?.lowercase()
+    val piPicoBoards =
+        setOf("rpi_pico", "rpi_pico2", "rpi_pico_w", "rpi_pico2_w", "raspberrypi_pico", "w5500_evb_pico")
+    val isPiPico = boardName != null && boardName in piPicoBoards
+    if (isPiPico) {
+      // For Raspberry Pi Pico, we probably need to set the console to use the UART,
+      // otherwise we won't see any output.
+      // Also, we need to enable the entropy generator for the random number generator,
+      // which is used by the reactor-uc.
+      val picoConfig =
+          """
+            |# Pico specific configuration
+            |
+            |CONFIG_SERIAL=y
+            |CONFIG_UART_CONSOLE=y
+            |CONFIG_STDOUT_CONSOLE=y
+            |CONFIG_ENTROPY_GENERATOR=y
+            |CONFIG_TEST_RANDOM_GENERATOR=y
+          """
+              .trimMargin()
+
+      prjConf += "\n$picoConfig"
+    }
+
     FileUtil.writeToFile(prjConf, projectRoot.resolve("prj.conf"))
   }
 
