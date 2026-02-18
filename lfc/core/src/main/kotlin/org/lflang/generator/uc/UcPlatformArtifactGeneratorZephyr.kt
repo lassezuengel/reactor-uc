@@ -109,7 +109,10 @@ class UcPlatformArtifactGeneratorZephyr(
 
     FileUtil.writeToFile(prjConf, projectRoot.resolve("prj_lf.conf"))
 
-    copyFromWorkspace("prj.conf")
+    // Copy user-provided files from the workspace, if they exist. This allows users to provide
+    // custom Zephyr configurations without needing to modify the generated code (e.g., by providing
+    // a `prj.conf` overlay).
+    listOf("prj.conf", "Kconfig", "app.overlay").forEach(::copyFromWorkspace)
   }
   private fun projectName(): String =
       when (val ctx = context) {
