@@ -11,11 +11,13 @@ import org.lflang.util.FileUtil
  * standalone applications and federated executables, allowing future federated-only extensions.
  */
 class UcPlatformArtifactGeneratorZephyr(
-    private val mainDef: Instantiation,
-    private val targetConfig: TargetConfig,
-    private val projectRoot: Path,
-    private val context: UcGeneratorFactory.PlatformContext
-) : UcPlatformArtifactGenerator {
+  mainDef: Instantiation,
+  targetConfig: TargetConfig,
+  projectRoot: Path,
+  workspaceRoot: Path,
+  context: UcGeneratorFactory.PlatformContext
+) :
+  UcPlatformArtifactGenerator(mainDef, targetConfig, projectRoot, workspaceRoot, context) {
 
   private val S = '$'
 
@@ -31,6 +33,12 @@ class UcPlatformArtifactGeneratorZephyr(
             |set(PLATFORM "ZEPHYR" CACHE STRING "Platform to target")
             |if (NOT DEFINED BOARD)
             |  set(BOARD "${defaultBoard}")
+            |endif()
+            |# Include default lf conf-file.
+            |set(CONF_FILE prj_lf.conf)
+            |# Include user-provided conf-file, if it exists
+            |if(EXISTS prj.conf)
+            |  set(OVERLAY_CONFIG prj.conf)
             |endif()
             |set(_LF_ZEPHYR_HINTS)
             |if(DEFINED ENV{ZEPHYR_BASE} AND EXISTS "${S}ENV{ZEPHYR_BASE}")
@@ -99,9 +107,10 @@ class UcPlatformArtifactGeneratorZephyr(
       prjConf += "\n$picoConfig"
     }
 
-    FileUtil.writeToFile(prjConf, projectRoot.resolve("prj.conf"))
-  }
+    FileUtil.writeToFile(prjConf, projectRoot.resolve("prj_lf.conf"))
 
+    copyFromWorkspace("prj.conf")
+  }
   private fun projectName(): String =
       when (val ctx = context) {
         is UcGeneratorFactory.PlatformContext.Federated -> "${mainDef.name}_${ctx.federate.name}"

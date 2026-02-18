@@ -89,18 +89,25 @@ object UcGeneratorFactory {
   /**
    * Creates a platform-specific artifact generator (e.g., Zephyr CMake emitters) if needed. Returns
    * null when the platform uses only the standard native build files.
+   *
+   * @param mainDef The main instantiation
+   * @param targetConfig The target configuration containing platform information
+   * @param projectRoot The root directory of the generated project
+   * @param workspaceRoot The root directory of the workspace, used for retrieving user-provided files
+   * @param context The platform context (standalone vs federated) to tailor the generated artifacts
    */
   fun createPlatformArtifactGenerator(
       mainDef: Instantiation,
       targetConfig: TargetConfig,
       projectRoot: Path,
+      workspaceRoot: Path,
       context: PlatformContext
   ): UcPlatformArtifactGenerator? {
     val platform = targetConfig.get(PlatformProperty.INSTANCE).platform
 
     return when (platform) {
       PlatformType.Platform.ZEPHYR ->
-          UcPlatformArtifactGeneratorZephyr(mainDef, targetConfig, projectRoot, context)
+          UcPlatformArtifactGeneratorZephyr(mainDef, targetConfig, projectRoot, workspaceRoot, context)
       else -> null
     }
   }
