@@ -46,7 +46,7 @@ abstract class UcPlatformGenerator(protected val generator: UcGenerator) {
    */
   protected fun generatePlatformSpecificFiles(context: UcGeneratorFactory.PlatformContext) {
     UcGeneratorFactory.createPlatformArtifactGenerator(
-            generator.mainDef, targetConfig, srcGenPath, context)
+            generator.mainDef, targetConfig, srcGenPath, fileConfig.srcPkgPath, context)
         ?.generate()
   }
 

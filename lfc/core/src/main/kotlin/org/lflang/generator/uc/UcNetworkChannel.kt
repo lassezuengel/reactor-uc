@@ -125,8 +125,7 @@ class UcTcpIpInterface(private val ipAddress: IPAddress, name: String? = null) :
             }
             address
           } else {
-            if (useIpv6) UcZephyrIpv6Allocator.nextAddress()
-            else IPAddress.fromString("127.0.0.1")
+            if (useIpv6) UcZephyrIpv6Allocator.nextAddress() else IPAddress.fromString("127.0.0.1")
           }
       IpAddressManager.acquireIp(ip)
       UcZephyrIpv6Allocator.markAsUsed(ip)
@@ -182,9 +181,9 @@ class UcCoapUdpIpInterface(private val ipAddress: IPAddress, name: String? = nul
 
   companion object {
     fun fromAttribute(
-      federate: UcFederate,
-      attr: Attribute,
-      useIpv6: Boolean
+        federate: UcFederate,
+        attr: Attribute,
+        useIpv6: Boolean
     ): UcCoapUdpIpInterface {
       val address = attr.getParamString("address")
       val name = attr.getParamString("name")

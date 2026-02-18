@@ -1,14 +1,15 @@
 package org.lflang.generator.uc
 
+import java.nio.file.Files
 import java.nio.file.Path
-import kotlin.math.max
 import kotlin.collections.buildList
+import kotlin.math.max
 import org.lflang.generator.ZephyrConfig
 import org.lflang.lf.Instantiation
 import org.lflang.target.TargetConfig
 import org.lflang.target.property.FedNetInterfaceProperty
-import org.lflang.target.property.PlatformProperty
 import org.lflang.target.property.LoggingProperty
+import org.lflang.target.property.PlatformProperty
 import org.lflang.target.property.type.FedNetInterfaceType.FedNetInterface
 import org.lflang.target.property.type.LoggingType.LogLevel
 import org.lflang.util.FileUtil
@@ -16,15 +17,26 @@ import org.lflang.util.FileUtil
 /**
  * Emits Zephyr-specific build scaffolding. The provided platform context distinguishes between
  * standalone applications and federated executables, allowing future federated-only extensions.
+ *
+ * Specifically, this generator generates...
+ * - a `CMakeLists.txt` that sets up the Zephyr build environment and includes the generated code
+ *   from the reactor-uc library. Ready to build!
+ * - a `prj_lf.conf` with the necessary Zephyr configuration options for the generated code,
+ *   depending on whether the application is standalone or federated. Depending on the target board,
+ *   additional board-specific configuration may be included as well (e.g., for Raspberry Pi Pico
+ *   boards). Furthermore, if the user has specified additional relevant files in the workspace,
+ *   these are added to the build as well.
  */
 class UcPlatformArtifactGeneratorZephyr(
-    private val mainDef: Instantiation,
-    private val targetConfig: TargetConfig,
-    private val projectRoot: Path,
-    private val context: UcGeneratorFactory.PlatformContext
-) : UcPlatformArtifactGenerator {
+    mainDef: Instantiation,
+    targetConfig: TargetConfig,
+    projectRoot: Path,
+    workspaceRoot: Path,
+    context: UcGeneratorFactory.PlatformContext
+) : UcPlatformArtifactGenerator(mainDef, targetConfig, projectRoot, workspaceRoot, context) {
 
   private val S = '$'
+  private val boardConfigProvider = ZephyrBoardConfigProvider()
 
   companion object {
     private var fedId = 0
@@ -42,6 +54,12 @@ class UcPlatformArtifactGeneratorZephyr(
             |set(PLATFORM "ZEPHYR" CACHE STRING "Platform to target")
             |if (NOT DEFINED BOARD)
             |  set(BOARD "${defaultBoard}")
+            |endif()
+            |# Include default lf conf-file.
+            |set(CONF_FILE prj_lf.conf)
+            |# Include user-provided conf-file, if it exists
+            |if(EXISTS prj.conf)
+            |  set(OVERLAY_CONFIG prj.conf)
             |endif()
             |set(_LF_ZEPHYR_HINTS)
             |if(DEFINED ENV{ZEPHYR_BASE} AND EXISTS "${S}ENV{ZEPHYR_BASE}")
@@ -65,14 +83,26 @@ class UcPlatformArtifactGeneratorZephyr(
             additionalVariables = additionalVariables())
     FileUtil.writeToFile(cmake, projectRoot.resolve("CMakeLists.txt"))
 
-    val prjConf =
+    val basePrjConf =
         when (context) {
           is UcGeneratorFactory.PlatformContext.Standalone -> generatePrjConfStandalone()
           is UcGeneratorFactory.PlatformContext.Federated -> generatePrjConfFederated(context)
         }
 
-    FileUtil.writeToFile(prjConf, projectRoot.resolve("prj.conf"))
-    FileUtil.writeToFile(generateKconfig(), projectRoot.resolve("Kconfig"))
+    val boardName = platformOptions.board().value()?.lowercase()
+    val boardSpecificConfig = boardConfigProvider.configFor(boardName)
+    val prjConf =
+        listOf(basePrjConf, boardSpecificConfig).filterNotNull().joinToString(separator = "\n\n")
+
+    FileUtil.writeToFile(prjConf, projectRoot.resolve("prj_lf.conf"))
+
+    val mergedKconfig = mergeKconfigWithWorkspace(generateKconfig())
+    FileUtil.writeToFile(mergedKconfig, projectRoot.resolve("Kconfig"))
+
+    // Copy user-provided files from the workspace, if they exist. This allows users to provide
+    // custom Zephyr configurations without needing to modify the generated code (e.g., by providing
+    // a `prj.conf` overlay).
+    listOf("prj.conf", "app.overlay").forEach(::copyFromWorkspace)
   }
 
   /**
@@ -98,7 +128,7 @@ class UcPlatformArtifactGeneratorZephyr(
           .trimMargin()
 
   /**
-   * Generate a prj.conf for federated applications, enabling necessary Zephyr features for
+   * Generate a `prj.conf` for federated applications, enabling necessary Zephyr features for
    * communication and configuration. The generated config includes settings for POSIX sockets,
    * network buffers, IP address configuration, and additional system settings.
    */
@@ -132,15 +162,16 @@ class UcPlatformArtifactGeneratorZephyr(
     }
 
     val devIpv6 =
-      fed.federate.interfaces
-        .asSequence()
-        .filterIsInstance<UcTcpIpInterface>()
-        .map { it.getIpAddress().address }
-        .firstOrNull()
-        ?: "fd01::${fedId++}"
+        fed.federate.interfaces
+            .asSequence()
+            .filterIsInstance<UcTcpIpInterface>()
+            .map { it.getIpAddress().address }
+            .firstOrNull() ?: "fd01::${fedId++}"
 
+    // TODO: note that this minimum is too small! Check how many connections we need!
+    // val axConnections = maxConnectionsFor(fed).toString()
+    // TODO: hardcoded for now!
     val maxConnections = "10"
-    //val axConnections = maxConnectionsFor(fed).toString() // notice that this minimum is too small! Check how many connections we need!
 
     return ZephyrConfig()
         .comment("Lingua Franca Zephyr configuration file")
@@ -207,6 +238,11 @@ class UcPlatformArtifactGeneratorZephyr(
         .generateOutput()
   }
 
+  /**
+   * Determine the default Zephyr log level based on the target configuration's logging property.
+   * This maps the LF log levels to Zephyr's numeric log levels, allowing us to set an appropriate
+   * default log level in the generated configs.
+   */
   private fun zephyrLogDefaultLevel(): String {
     return when (targetConfig.getOrDefault(LoggingProperty.INSTANCE)) {
       LogLevel.ERROR -> "1"
@@ -218,6 +254,16 @@ class UcPlatformArtifactGeneratorZephyr(
     }
   }
 
+  /**
+   * Generate the content of the Kconfig file, which defines configuration options for the Zephyr
+   * build. This includes options for the TCP/IP channel worker thread, allowing users to customize
+   * its stack size, guard region, preempt priority, and thread name.
+   *
+   * Because not only this Kconfig, but also the associated prj.conf file is generated and not
+   * user-configurable, this is of little use to users in terms of customization, but it does allow
+   * us to provide a clear place for us to pass additional compile-time configuration options to the
+   * Zephyr build system.
+   */
   private fun generateKconfig(): String =
       """
         |source "Kconfig.zephyr"
@@ -258,15 +304,15 @@ class UcPlatformArtifactGeneratorZephyr(
         UcGeneratorFactory.PlatformContext.Standalone -> mainDef.name
       }
 
-  private fun additionalVariables(): List<String> =
-      buildList {
-        val logLevel =
-            "set(LOG_LEVEL LF_LOG_LEVEL_${targetConfig.getOrDefault(LoggingProperty.INSTANCE).name.uppercase()})"
-        add(logLevel)
-        if (context is UcGeneratorFactory.PlatformContext.Federated) {
-          add("set(FEDERATE ${context.federate.name})")
-        }
-      }
+  /** Generate additional CMake variables based on the target configuration and platform context. */
+  private fun additionalVariables(): List<String> = buildList {
+    val logLevel =
+        "set(LOG_LEVEL LF_LOG_LEVEL_${targetConfig.getOrDefault(LoggingProperty.INSTANCE).name.uppercase()})"
+    add(logLevel)
+    if (context is UcGeneratorFactory.PlatformContext.Federated) {
+      add("set(FEDERATE ${context.federate.name})")
+    }
+  }
 
   private fun maxConnectionsFor(fed: UcGeneratorFactory.PlatformContext.Federated): Int =
       max(1, UcConnectionGenerator.getNumNetworkBundles(fed.federate))
@@ -302,4 +348,88 @@ class UcPlatformArtifactGeneratorZephyr(
     builder.appendLine()
     return builder.toString()
   }
+
+  /**
+   * Merge the generated Kconfig content with any user-provided Kconfig overlay from the workspace.
+   * If the user has provided a Kconfig file in the workspace, its content will be appended to the
+   * generated Kconfig with a clear separator comment. If no user Kconfig is provided, the generated
+   * content will be returned as-is.
+   */
+  private fun mergeKconfigWithWorkspace(generated: String): String {
+    val workspaceKconfig = workspaceRoot.resolve("Kconfig")
+    if (!Files.exists(workspaceKconfig)) {
+      return generated
+    }
+
+    val userConfig = Files.readString(workspaceKconfig)
+    if (userConfig.isBlank()) {
+      return generated
+    }
+
+    return buildString {
+      append(generated.trimEnd())
+      append("\n\n# ---- User-provided Kconfig overlay ----\n")
+      append(userConfig.trimStart())
+    }
+  }
+}
+
+/**
+ * Provides Zephyr configuration snippets based on the target board. This allows us to conditionally
+ * include board-specific configurations without hardcoding them into the main generator logic.
+ *
+ * This may be needed for some boards that require specific drivers or settings to even compile the
+ * generated code and reactor-uc libraries. We don't want the user to have to know about these
+ * details or even be aware that they need to provide their own custom configuration files, so we
+ * include them automatically based on the board specified in the target configuration.
+ *
+ * Currently, this is only used for Raspberry Pi Pico boards, which require additional entropy
+ * generator settings.
+ */
+private class ZephyrBoardConfigProvider {
+
+  private data class BoardConfig(
+      val boards: Set<String>,
+      val config: String,
+  ) {
+    fun matches(boardName: String?) = boardName != null && boardName in boards
+  }
+
+  /**
+   * List of known board configurations. Each entry specifies a set of board names and the
+   * corresponding Zephyr configuration snippet to include if the target board matches any of those
+   * names.
+   */
+  private val boardConfigs =
+      listOf(
+          BoardConfig(
+              boards =
+                  setOf(
+                      "rpi_pico",
+                      "rpi_pico2",
+                      "rpi_pico_w",
+                      "rpi_pico2_w",
+                      "raspberrypi_pico",
+                      "w5500_evb_pico"),
+              config =
+                  """
+        |# Pico specific configuration
+        |
+        |CONFIG_SERIAL=y
+        |CONFIG_UART_CONSOLE=y
+        |CONFIG_STDOUT_CONSOLE=y
+        |CONFIG_ENTROPY_GENERATOR=y
+        |CONFIG_TEST_RANDOM_GENERATOR=y
+        """
+                      .trimMargin()),
+      )
+
+  /** Returns the Zephyr configuration snippet for the given board name, or null if there are no */
+  fun configFor(boardName: String?): String? =
+      boardConfigs
+          .asSequence()
+          .filter { it.matches(boardName) }
+          .map { it.config }
+          .joinToString(separator = "\n")
+          .takeIf { it.isNotBlank() }
 }

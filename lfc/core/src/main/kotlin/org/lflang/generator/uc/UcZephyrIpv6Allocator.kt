@@ -4,9 +4,8 @@ import java.net.InetAddress
 import kotlin.math.max
 
 /**
- * Simple allocator for IPv6 addresses used by Zephyr federates.
- * Generates addresses in the fd01::/64 prefix and tracks reservations from
- * attributes to avoid collisions across federates.
+ * Simple allocator for IPv6 addresses used by Zephyr federates. Generates addresses in the
+ * fd01::/64 prefix and tracks reservations from attributes to avoid collisions across federates.
  */
 object UcZephyrIpv6Allocator {
   private const val PREFIX = "fd01::"
