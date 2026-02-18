@@ -11,15 +11,15 @@ import org.lflang.util.FileUtil
  * standalone applications and federated executables, allowing future federated-only extensions.
  */
 class UcPlatformArtifactGeneratorZephyr(
-  mainDef: Instantiation,
-  targetConfig: TargetConfig,
-  projectRoot: Path,
-  workspaceRoot: Path,
-  context: UcGeneratorFactory.PlatformContext
-) :
-  UcPlatformArtifactGenerator(mainDef, targetConfig, projectRoot, workspaceRoot, context) {
+    mainDef: Instantiation,
+    targetConfig: TargetConfig,
+    projectRoot: Path,
+    workspaceRoot: Path,
+    context: UcGeneratorFactory.PlatformContext
+) : UcPlatformArtifactGenerator(mainDef, targetConfig, projectRoot, workspaceRoot, context) {
 
   private val S = '$'
+  private val boardConfigProvider = ZephyrBoardConfigProvider()
 
   override fun generate() {
     val platformOptions = targetConfig.get(PlatformProperty.INSTANCE)
@@ -84,27 +84,10 @@ class UcPlatformArtifactGeneratorZephyr(
             .trimMargin()
 
     val boardName = platformOptions.board().value()?.lowercase()
-    val piPicoBoards =
-        setOf("rpi_pico", "rpi_pico2", "rpi_pico_w", "rpi_pico2_w", "raspberrypi_pico", "w5500_evb_pico")
-    val isPiPico = boardName != null && boardName in piPicoBoards
-    if (isPiPico) {
-      // For Raspberry Pi Pico, we probably need to set the console to use the UART,
-      // otherwise we won't see any output.
-      // Also, we need to enable the entropy generator for the random number generator,
-      // which is used by the reactor-uc.
-      val picoConfig =
-          """
-            |# Pico specific configuration
-            |
-            |CONFIG_SERIAL=y
-            |CONFIG_UART_CONSOLE=y
-            |CONFIG_STDOUT_CONSOLE=y
-            |CONFIG_ENTROPY_GENERATOR=y
-            |CONFIG_TEST_RANDOM_GENERATOR=y
-          """
-              .trimMargin()
+    val boardSpecificConfig = boardConfigProvider.configFor(boardName)
 
-      prjConf += "\n$picoConfig"
+    if (boardSpecificConfig != null) {
+      prjConf += "\n\n$boardSpecificConfig"
     }
 
     FileUtil.writeToFile(prjConf, projectRoot.resolve("prj_lf.conf"))
@@ -114,6 +97,7 @@ class UcPlatformArtifactGeneratorZephyr(
     // a `prj.conf` overlay).
     listOf("prj.conf", "Kconfig", "app.overlay").forEach(::copyFromWorkspace)
   }
+
   private fun projectName(): String =
       when (val ctx = context) {
         is UcGeneratorFactory.PlatformContext.Federated -> "${mainDef.name}_${ctx.federate.name}"
@@ -157,4 +141,64 @@ class UcPlatformArtifactGeneratorZephyr(
     builder.appendLine()
     return builder.toString()
   }
+}
+
+/**
+ * Provides Zephyr configuration snippets based on the target board. This allows us to conditionally
+ * include board-specific configurations without hardcoding them into the main generator logic.
+ *
+ * This may be needed for some boards that require specific drivers or settings to even compile the
+ * generated code and reactor-uc libraries. We don't want the user to have to know about these
+ * details or even be aware that they need to provide their own custom configuration files, so we
+ * include them automatically based on the board specified in the target configuration.
+ *
+ * Currently, this is only used for Raspberry Pi Pico boards, which require additional entropy
+ * generator settings.
+ */
+private class ZephyrBoardConfigProvider {
+
+  private data class BoardConfig(
+      val boards: Set<String>,
+      val config: String,
+  ) {
+    fun matches(boardName: String?) = boardName != null && boardName in boards
+  }
+
+  /**
+   * List of known board configurations. Each entry specifies a set of board names and the
+   * corresponding Zephyr configuration snippet to include if the target board matches any of those
+   * names.
+   */
+  private val boardConfigs =
+      listOf(
+          BoardConfig(
+              boards =
+                  setOf(
+                      "rpi_pico",
+                      "rpi_pico2",
+                      "rpi_pico_w",
+                      "rpi_pico2_w",
+                      "raspberrypi_pico",
+                      "w5500_evb_pico"),
+              config =
+                  """
+        |# Pico specific configuration
+        |
+        |CONFIG_SERIAL=y
+        |CONFIG_UART_CONSOLE=y
+        |CONFIG_STDOUT_CONSOLE=y
+        |CONFIG_ENTROPY_GENERATOR=y
+        |CONFIG_TEST_RANDOM_GENERATOR=y
+        """
+                      .trimMargin()),
+      )
+
+  /** Returns the Zephyr configuration snippet for the given board name, or null if there are no */
+  fun configFor(boardName: String?): String? =
+      boardConfigs
+          .asSequence()
+          .filter { it.matches(boardName) }
+          .map { it.config }
+          .joinToString(separator = "\n")
+          .takeIf { it.isNotBlank() }
 }

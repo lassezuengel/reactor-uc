@@ -10,7 +10,8 @@ import org.lflang.util.FileUtil
  * Base class for optional platform-specific artifact generators. Subclasses emit additional build
  * scaffolding beyond the default native files and can take advantage of shared helpers.
  */
-abstract class UcPlatformArtifactGenerator protected constructor(
+abstract class UcPlatformArtifactGenerator
+protected constructor(
     protected val mainDef: Instantiation,
     protected val targetConfig: TargetConfig,
     protected val projectRoot: Path,
@@ -22,8 +23,8 @@ abstract class UcPlatformArtifactGenerator protected constructor(
 
   /**
    * Helper for copying files from the workspace to the generated project. This is useful for
-   * platform-specific generators that want to allow users to provide custom files (e.g.,
-   * additional (overlay) configurations).
+   * platform-specific generators that want to allow users to provide custom files (e.g., additional
+   * (overlay) configurations).
    */
   protected fun copyFromWorkspace(fileName: String) {
     val sourcePath = workspaceRoot.resolve(fileName)
