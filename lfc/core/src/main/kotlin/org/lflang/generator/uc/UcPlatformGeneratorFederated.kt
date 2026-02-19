@@ -25,6 +25,9 @@ class UcPlatformGeneratorFederated(
   override val buildTarget: String?
     get() = if (effectivePlatform == PlatformType.Platform.ZEPHYR) null else super.buildTarget
 
+  override fun shouldCleanBuildDirectory(): Boolean =
+      effectivePlatform == PlatformType.Platform.ZEPHYR
+
   override fun supportsInstallTarget(): Boolean = effectivePlatform != PlatformType.Platform.ZEPHYR
 
   override fun generatePlatformFiles() {

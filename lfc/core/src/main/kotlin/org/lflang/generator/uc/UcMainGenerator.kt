@@ -1,5 +1,6 @@
 package org.lflang.generator.uc
 
+import kotlin.random.Random
 import org.lflang.generator.PrependOperator
 import org.lflang.generator.uc.UcReactorGenerator.Companion.codeType
 import org.lflang.generator.uc.UcReactorGenerator.Companion.hasPhysicalActions
@@ -7,8 +8,12 @@ import org.lflang.lf.Reactor
 import org.lflang.reactor
 import org.lflang.target.TargetConfig
 import org.lflang.target.property.FastProperty
+import org.lflang.target.property.FedNetInterfaceProperty
 import org.lflang.target.property.KeepaliveProperty
+import org.lflang.target.property.PlatformProperty
 import org.lflang.target.property.TimeOutProperty
+import org.lflang.target.property.type.FedNetInterfaceType.FedNetInterface
+import org.lflang.target.property.type.PlatformType.Platform
 import org.lflang.toUnixString
 
 abstract class UcMainGenerator(
@@ -169,9 +174,11 @@ class UcMainGeneratorFederated(
     numReactions: Int,
     private val fileConfig: UcFileConfig,
 ) : UcMainGenerator(targetConfig, numEvents, numReactions) {
+  private val buildMarker = Random.nextInt()
   private val top = currentFederate.inst.eContainer() as Reactor
   private val main = currentFederate.inst.reactor
-  private val ucConnectionGenerator = UcConnectionGenerator(top, currentFederate, otherFederates)
+  private val ucConnectionGenerator =
+      UcConnectionGenerator(top, currentFederate, otherFederates, targetConfig)
   private val netBundlesSize = ucConnectionGenerator.getNumFederatedConnectionBundles()
   private val clockSyncGenerator =
       UcClockSyncGenerator(currentFederate, ucConnectionGenerator, targetConfig)
@@ -202,6 +209,23 @@ class UcMainGeneratorFederated(
 
   override fun generateStartSource() =
       with(PrependOperator) {
+        val needsConnectionManager =
+            targetConfig.get(PlatformProperty.INSTANCE).platform() == Platform.ZEPHYR &&
+                targetConfig.get(FedNetInterfaceProperty.INSTANCE) == FedNetInterface.SICSLOWPAN
+        val connectionManagerBlock =
+            if (needsConnectionManager) {
+              """
+            |#if defined(PLATFORM_ZEPHYR)
+            |    printf("Waiting for network connection....\n");
+            |    lf_init_connection_manager();
+            |    lf_wait_for_network_connection();
+            |    printf("Network ready, continuing.\n");
+            |#endif
+            |
+              """
+            } else {
+              ""
+            }
         """
             |#include "reactor-uc/reactor-uc.h"
         ${" |"..generateIncludeScheduler()}
@@ -215,10 +239,12 @@ class UcMainGeneratorFederated(
             |   FederatedEnvironment_free(&lf_environment);
             |}
             |void lf_start(void) {
+            |    printf("Hello from ${currentFederate.codeType} build ${buildMarker}\\n!");
+              ${connectionManagerBlock}
         ${" |    "..generateInitializeQueues()}
         ${" |    "..generateInitializeScheduler()}
-            |    FederatedEnvironment_ctor(&lf_environment, (Reactor *)&main_reactor, scheduler, ${fast()},  
-            |                     (FederatedConnectionBundle **) &main_reactor._bundles, ${netBundlesSize}, &main_reactor.${UcStartupCoordinatorGenerator.instName}.super, 
+            |    FederatedEnvironment_ctor(&lf_environment, (Reactor *)&main_reactor, scheduler, ${fast()},
+            |                     (FederatedConnectionBundle **) &main_reactor._bundles, ${netBundlesSize}, &main_reactor.${UcStartupCoordinatorGenerator.instName}.super,
             |                     ${if (clockSyncGenerator.enabled()) "&main_reactor.${UcClockSyncGenerator.instName}.super" else "NULL"});
             |    ${currentFederate.codeType}_ctor(&main_reactor, NULL, _lf_environment);
             |    _lf_environment->assemble(_lf_environment);

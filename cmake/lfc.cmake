@@ -28,7 +28,7 @@ function(lf_run_lfc LF_SOURCE_DIR LF_MAIN)
   # Check if the LF_MAIN file exists
   if (NOT EXISTS ${LF_SOURCE_DIR}/${LF_MAIN}.lf)
     message(FATAL_ERROR "LF main file does not exist: ${LF_SOURCE_DIR}/${LF_MAIN}.lf")
-  endif()  
+  endif()
 
   set(LFC_COMMAND $ENV{REACTOR_UC_PATH}/lfc/bin/lfc-dev ${LF_SOURCE_DIR}/${LF_MAIN}.lf -n -o ${CMAKE_CURRENT_SOURCE_DIR})
   execute_process(COMMAND echo "Running LFC: ${LFC_COMMAND}")
@@ -47,7 +47,7 @@ endfunction()
 # Build the generated code from the LFC compiler. This function should be called after lf_run_lfc.
 # Args:
 #   TARGET: The CMake target to build the generated code for. This target must already be defined.
-#   SOURCE_GEN_DIR: The directory containing the generated code. This is typically src-gen/${LF_MAIN}. 
+#   SOURCE_GEN_DIR: The directory containing the generated code. This is typically src-gen/${LF_MAIN}.
 function(lf_build_generated_code MAIN_TARGET SOURCE_GEN_DIR)
 
   # Check that TARGET is defined
