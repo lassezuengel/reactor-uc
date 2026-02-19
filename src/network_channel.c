@@ -58,29 +58,27 @@ static struct k_work_delayable connection_work;
  * - Priority inversion when signaling the semaphore
  * - Violating Zephyr 4.x restrictions on operations in event callbacks
  */
-static void connection_work_handler(struct k_work *work) {
-  k_sem_give(&run_lf_fed);
-}
+static void connection_work_handler(struct k_work* work) { k_sem_give(&run_lf_fed); }
 
 /**
  * @brief Network management event handler for Zephyr's connection manager.
  */
-static void lf_connection_manager_event_handler(struct net_mgmt_event_callback *cb,
-                                                uint32_t mgmt_event, struct net_if *iface) {
+static void lf_connection_manager_event_handler(struct net_mgmt_event_callback* cb, uint32_t mgmt_event,
+                                                struct net_if* iface) {
   ARG_UNUSED(iface);
   ARG_UNUSED(cb);
 
   switch (mgmt_event) {
-    case NET_EVENT_L4_CONNECTED:
-      k_work_schedule(&connection_work, K_NO_WAIT);
-      break;
+  case NET_EVENT_L4_CONNECTED:
+    k_work_schedule(&connection_work, K_NO_WAIT);
+    break;
 
-    case NET_EVENT_L4_DISCONNECTED:
-      k_sem_reset(&run_lf_fed);
-      break;
+  case NET_EVENT_L4_DISCONNECTED:
+    k_sem_reset(&run_lf_fed);
+    break;
 
-    default:
-      break;
+  default:
+    break;
   }
 }
 
@@ -91,9 +89,7 @@ void lf_init_connection_manager(void) {
   k_work_init_delayable(&connection_work, connection_work_handler);
 
   if (IS_ENABLED(CONFIG_NET_CONNECTION_MANAGER)) {
-    net_mgmt_init_event_callback(&mgmt_cb,
-                                 lf_connection_manager_event_handler,
-                                 EVENT_MASK);
+    net_mgmt_init_event_callback(&mgmt_cb, lf_connection_manager_event_handler, EVENT_MASK);
     net_mgmt_add_event_callback(&mgmt_cb);
 
     // We would usually call `conn_mgr_mon_resend_status()` now in order
@@ -104,7 +100,7 @@ void lf_init_connection_manager(void) {
     // the semaphore if we are already connected.
 
     // Instead, check if already connected
-    struct net_if *iface = net_if_get_default();
+    struct net_if* iface = net_if_get_default();
     if (iface && net_if_is_up(iface)) {
       if (net_if_ipv6_get_global_addr(NET_ADDR_PREFERRED, &iface)) {
         k_sem_give(&run_lf_fed);
@@ -122,9 +118,7 @@ void lf_init_connection_manager(void) {
 /**
  * @brief Waits for the network connection to be ready.
  */
-void lf_wait_for_network_connection(void) {
-  k_sem_take(&run_lf_fed, K_FOREVER);
-}
+void lf_wait_for_network_connection(void) { k_sem_take(&run_lf_fed, K_FOREVER); }
 #endif // PLATFORM_ZEPHYR
 
 char* NetworkChannel_state_to_string(NetworkChannelState state) {

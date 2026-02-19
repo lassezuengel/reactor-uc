@@ -73,8 +73,7 @@ static void _TcpIpChannel_worker_thread(void* p1, void* p2, void* p3);
 /**
  * @brief Fill a `sockaddr_storage` based on the host and protocol family of the channel.
  */
-static lf_ret_t _TcpIpChannel_fill_sockaddr(TcpIpChannel* self, struct sockaddr_storage* storage,
-                                            socklen_t* addrlen) {
+static lf_ret_t _TcpIpChannel_fill_sockaddr(TcpIpChannel* self, struct sockaddr_storage* storage, socklen_t* addrlen) {
   memset(storage, 0, sizeof(*storage));
 
   switch (self->protocol_family) {
@@ -189,9 +188,9 @@ static void _TcpIpChannel_spawn_worker_thread(TcpIpChannel* self) {
 
 #ifdef PLATFORM_ZEPHYR
   self->worker_thread_id =
-      k_thread_create(&self->worker_thread, self->worker_thread_stack,
-                      K_KERNEL_STACK_SIZEOF(self->worker_thread_stack), _TcpIpChannel_worker_thread, self, NULL,
-                      NULL, TCP_IP_CHANNEL_ZEPHYR_THREAD_PRIORITY, TCP_IP_CHANNEL_ZEPHYR_THREAD_OPTIONS, K_NO_WAIT);
+      k_thread_create(&self->worker_thread, self->worker_thread_stack, K_KERNEL_STACK_SIZEOF(self->worker_thread_stack),
+                      _TcpIpChannel_worker_thread, self, NULL, NULL, TCP_IP_CHANNEL_ZEPHYR_THREAD_PRIORITY,
+                      TCP_IP_CHANNEL_ZEPHYR_THREAD_OPTIONS, K_NO_WAIT);
 
   if (self->worker_thread_id == NULL) {
     throw("k_thread_create failed");

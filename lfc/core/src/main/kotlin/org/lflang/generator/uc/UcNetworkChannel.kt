@@ -359,31 +359,15 @@ class UcTcpIpChannel(
     return "TcpIpChannel_ctor(&self->channel, \"${serverAddress}\", ${serverPort}, ${protocolFamily}, ${role});"
   }
 
-  // override fun generateChannelCtorSrc(): String {
-  //   return ctorString(serverLhs)
-  // }
-
-  // override fun generateChannelCtorDest(): String {
-  //   return ctorString(!serverLhs)
-  // }
-
-  // fun generateChannelCtorForRole(isServer: Boolean): String = ctorString(isServer)
-
   override fun generateChannelCtorSrc(): String {
-    val isServer = serverLhs
-    val host = serverAddress
-    val port = serverPort
-    val role = if (isServer) "true" else "false"
-    return "TcpIpChannel_ctor(&self->channel, \"${host}\", ${port}, ${protocolFamily}, ${role});"
+    return ctorString(serverLhs)
   }
 
   override fun generateChannelCtorDest(): String {
-    val isServer = !serverLhs
-    val host = serverAddress
-    val port = serverPort
-    val role = if (isServer) "true" else "false"
-    return "TcpIpChannel_ctor(&self->channel, \"${host}\", ${port}, ${protocolFamily}, ${role});"
+    return ctorString(!serverLhs)
   }
+
+  fun generateChannelCtorForRole(isServer: Boolean): String = ctorString(isServer)
 
   override val codeType: String
     get() = "TcpIpChannel"
