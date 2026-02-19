@@ -42,27 +42,27 @@
 #define TCP_IP_CHANNEL_DEBUG(fmt, ...)                                                                                 \
   LF_DEBUG(NET, "TcpIpChannel: [%s] " fmt, self->is_server ? "server" : "client", ##__VA_ARGS__)
 
-// Forward declarations
 #ifdef PLATFORM_ZEPHYR
 #ifdef CONFIG_LF_TCP_IP_CHANNEL_THREAD_PREEMPT_LEVEL
 #define TCP_IP_CHANNEL_ZEPHYR_THREAD_PRIORITY K_PRIO_PREEMPT(CONFIG_LF_TCP_IP_CHANNEL_THREAD_PREEMPT_LEVEL)
 #else
 #define TCP_IP_CHANNEL_ZEPHYR_THREAD_PRIORITY K_PRIO_PREEMPT(0)
-#endif
+#endif // CONFIG_LF_TCP_IP_CHANNEL_THREAD_PREEMPT_LEVEL
 
 #ifndef CONFIG_LF_TCP_IP_CHANNEL_THREAD_OPTIONS
 #define TCP_IP_CHANNEL_ZEPHYR_THREAD_OPTIONS 0
 #else
 #define TCP_IP_CHANNEL_ZEPHYR_THREAD_OPTIONS CONFIG_LF_TCP_IP_CHANNEL_THREAD_OPTIONS
-#endif
+#endif // CONFIG_LF_TCP_IP_CHANNEL_THREAD_OPTIONS
 
 #ifndef CONFIG_LF_TCP_IP_CHANNEL_THREAD_NAME
 #define TCP_IP_CHANNEL_ZEPHYR_THREAD_NAME "lf_tcpip_rx"
 #else
 #define TCP_IP_CHANNEL_ZEPHYR_THREAD_NAME CONFIG_LF_TCP_IP_CHANNEL_THREAD_NAME
-#endif
-#endif
+#endif // CONFIG_LF_TCP_IP_CHANNEL_THREAD_NAME
+#endif // PLATFORM_ZEPHYR
 
+// Forward declarations
 static void _TcpIpChannel_worker_main(void* untyped_self);
 #ifndef PLATFORM_ZEPHYR
 static void* _TcpIpChannel_worker_thread(void* untyped_self);
