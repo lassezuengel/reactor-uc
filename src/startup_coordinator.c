@@ -30,6 +30,10 @@ static lf_ret_t StartupCoordinator_connect_to_neighbors_blocking(StartupCoordina
     ret = chan->open_connection(chan);
     // If we cannot open our network channels, then we cannot proceed and must abort.
     validate(ret == LF_OK);
+    if (bundle->clock_sync_channel != NULL) {
+      ret = bundle->clock_sync_channel->open_connection(bundle->clock_sync_channel);
+      validate(ret == LF_OK);
+    }
   }
 
   bool all_connected = false;
@@ -46,6 +50,13 @@ static lf_ret_t StartupCoordinator_connect_to_neighbors_blocking(StartupCoordina
         // Check if the expected_connect_duration is longer than the current wait time.
         if (chan->expected_connect_duration > wait_before_retry) {
           wait_before_retry = chan->expected_connect_duration;
+        }
+      }
+      NetworkChannel* clock_chan = env_fed->net_bundles[i]->clock_sync_channel;
+      if (clock_chan != NULL && !clock_chan->is_connected(clock_chan)) {
+        all_connected = false;
+        if (clock_chan->expected_connect_duration > wait_before_retry) {
+          wait_before_retry = clock_chan->expected_connect_duration;
         }
       }
     }

@@ -116,6 +116,7 @@ class UcPlatformArtifactGeneratorZephyr(
         |CONFIG_NET_DRIVERS=y
         |CONFIG_NETWORKING=y
         |CONFIG_NET_TCP=y
+        |CONFIG_NET_UDP=y
         |CONFIG_NET_IPV4=y
         |CONFIG_NET_SOCKETS=y
         |CONFIG_POSIX_API=y
@@ -213,7 +214,7 @@ class UcPlatformArtifactGeneratorZephyr(
         .property("NET_CONFIG_NEED_IPV4", "n")
         .property("NET_CONFIG_NEED_IPV6", "y")
         .property("NET_CONFIG_MY_IPV6_ADDR", "\"$devIpv6\"")
-        .property_if(devIpv6 == "fd01::2", "NET_CONFIG_PEER_IPV6_ADDR", "\"fd01::1\"")
+        // .property_if(devIpv6 == "fd01::2", "NET_CONFIG_PEER_IPV6_ADDR", "\"fd01::1\"")
         .property("NET_MAX_CONN", maxConnections)
         .property("ZVFS_OPEN_MAX", "16")
         .property("NET_IF_MAX_IPV6_COUNT", "2")

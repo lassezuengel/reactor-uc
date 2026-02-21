@@ -43,8 +43,9 @@ typedef lf_ret_t (*deserialize_hook)(void* user_struct, const unsigned char* msg
  * the serializers and deserializers for each connection.
  */
 struct FederatedConnectionBundle {
-  Reactor* parent;             // Pointer to the federate
-  NetworkChannel* net_channel; // Pointer to the network super doing the actual I/O
+  Reactor* parent;                    // Pointer to the federate
+  NetworkChannel* net_channel;        // Pointer to the network super doing the actual I/O
+  NetworkChannel* clock_sync_channel; // Optional dedicated channel for clock sync traffic.
   // Pointer to an array of input connections which should live in the derived struct.
   FederatedInputConnection** inputs;
   deserialize_hook* deserialize_hooks;
@@ -60,9 +61,10 @@ struct FederatedConnectionBundle {
 };
 
 void FederatedConnectionBundle_ctor(FederatedConnectionBundle* self, Reactor* parent, NetworkChannel* net_channel,
-                                    FederatedInputConnection** inputs, deserialize_hook* deserialize_hooks,
-                                    size_t inputs_size, FederatedOutputConnection** outputs,
-                                    serialize_hook* serialize_hooks, size_t outputs_size, size_t index);
+                                    NetworkChannel* clock_sync_channel, FederatedInputConnection** inputs,
+                                    deserialize_hook* deserialize_hooks, size_t inputs_size,
+                                    FederatedOutputConnection** outputs, serialize_hook* serialize_hooks,
+                                    size_t outputs_size, size_t index);
 
 /**
  * @brief A single output connection from this federate to another federate.

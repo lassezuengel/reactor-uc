@@ -21,6 +21,7 @@ static struct k_work_delayable connection_work;
 
 #include "platform/posix/tcp_ip_channel.c"
 #endif
+#include "platform/zephyr/udp_ip_channel.c"
 #elif defined(PLATFORM_RIOT)
 #ifdef NETWORK_CHANNEL_TCP_POSIX
 #include "platform/posix/tcp_ip_channel.c"

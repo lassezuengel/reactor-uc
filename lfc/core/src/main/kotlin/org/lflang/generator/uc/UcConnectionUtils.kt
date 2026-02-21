@@ -143,6 +143,15 @@ class UcFederatedConnectionBundle(
       } else {
         networkChannel.generateChannelCtorDest()
       }
+
+  fun generateClockSyncNetworkChannelCtor(federate: UcFederate): String {
+    val tcpChannel = networkChannel as UcTcpIpChannel
+    return if (federate == src) {
+      tcpChannel.generateClockSyncUdpChannelCtorSrc()
+    } else {
+      tcpChannel.generateClockSyncUdpChannelCtorDest()
+    }
+  }
 }
 
 /**

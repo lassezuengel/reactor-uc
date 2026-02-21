@@ -155,6 +155,9 @@ void FederatedEnvironment_free(FederatedEnvironment* self) {
   for (size_t i = 0; i < self->net_bundles_size; i++) {
     NetworkChannel* chan = self->net_bundles[i]->net_channel;
     chan->free(chan);
+    if (self->net_bundles[i]->clock_sync_channel != NULL) {
+      self->net_bundles[i]->clock_sync_channel->free(self->net_bundles[i]->clock_sync_channel);
+    }
   }
   LF_INFO(ENV, "All Network Channels freed. Exiting.");
 }

@@ -369,6 +369,14 @@ class UcTcpIpChannel(
 
   fun generateChannelCtorForRole(isServer: Boolean): String = ctorString(isServer)
 
+  fun generateClockSyncUdpChannelCtorSrc(): String {
+    return "UdpIpChannel_ctor(&self->clock_sync_channel, \"${srcTcp.ipAddress.address}\", ${srcTcp.port}, \"${destTcp.ipAddress.address}\", ${destTcp.port}, ${protocolFamily});"
+  }
+
+  fun generateClockSyncUdpChannelCtorDest(): String {
+    return "UdpIpChannel_ctor(&self->clock_sync_channel, \"${destTcp.ipAddress.address}\", ${destTcp.port}, \"${srcTcp.ipAddress.address}\", ${srcTcp.port}, ${protocolFamily});"
+  }
+
   override val codeType: String
     get() = "TcpIpChannel"
 }

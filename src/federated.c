@@ -263,15 +263,17 @@ void FederatedConnectionBundle_msg_received_cb(FederatedConnectionBundle* self, 
 }
 
 void FederatedConnectionBundle_ctor(FederatedConnectionBundle* self, Reactor* parent, NetworkChannel* net_channel,
-                                    FederatedInputConnection** inputs, deserialize_hook* deserialize_hooks,
-                                    size_t inputs_size, FederatedOutputConnection** outputs,
-                                    serialize_hook* serialize_hooks, size_t outputs_size, size_t index) {
+                                    NetworkChannel* clock_sync_channel, FederatedInputConnection** inputs,
+                                    deserialize_hook* deserialize_hooks, size_t inputs_size,
+                                    FederatedOutputConnection** outputs, serialize_hook* serialize_hooks,
+                                    size_t outputs_size, size_t index) {
   validate(self);
   validate(parent);
   validate(net_channel);
   self->inputs = inputs;
   self->inputs_size = inputs_size;
   self->net_channel = net_channel;
+  self->clock_sync_channel = clock_sync_channel;
   self->outputs = outputs;
   self->outputs_size = outputs_size;
   self->parent = parent;
@@ -279,11 +281,18 @@ void FederatedConnectionBundle_ctor(FederatedConnectionBundle* self, Reactor* pa
   self->serialize_hooks = serialize_hooks;
   self->index = index;
   self->net_channel->register_receive_callback(self->net_channel, FederatedConnectionBundle_msg_received_cb, self);
+  if (self->clock_sync_channel != NULL) {
+    self->clock_sync_channel->register_receive_callback(self->clock_sync_channel, FederatedConnectionBundle_msg_received_cb,
+                                                        self);
+  }
 }
 
 void FederatedConnectionBundle_validate(FederatedConnectionBundle* bundle) {
   validate(bundle);
   validate(bundle->net_channel);
+  if (bundle->clock_sync_channel != NULL) {
+    validate(bundle->clock_sync_channel);
+  }
   for (size_t i = 0; i < bundle->inputs_size; i++) {
     validate(bundle->inputs[i]);
     validate(bundle->deserialize_hooks[i]);

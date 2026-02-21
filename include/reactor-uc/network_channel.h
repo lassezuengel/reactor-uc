@@ -30,6 +30,7 @@ typedef enum {
 
 typedef enum {
   NETWORK_CHANNEL_TYPE_TCP_IP,
+  NETWORK_CHANNEL_TYPE_UDP_IP,
   NETWORK_CHANNEL_TYPE_COAP_UDP_IP,
   NETWORK_CHANNEL_TYPE_UART,
   NETWORK_CHANNEL_TYPE_S4NOC
@@ -156,6 +157,7 @@ void lf_wait_for_network_connection(void);
 #ifdef NETWORK_CHANNEL_TCP_POSIX
 #include "platform/posix/tcp_ip_channel.h"
 #endif
+#include "platform/zephyr/udp_ip_channel.h"
 
 #elif defined(PLATFORM_RIOT)
 #ifdef NETWORK_CHANNEL_TCP_POSIX

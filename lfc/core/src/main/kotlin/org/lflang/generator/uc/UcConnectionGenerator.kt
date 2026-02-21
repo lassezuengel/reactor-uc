@@ -11,8 +11,12 @@ import org.lflang.generator.uc.UcPortGenerator.Companion.isArray
 import org.lflang.generator.uc.UcReactorGenerator.Companion.codeType
 import org.lflang.lf.*
 import org.lflang.target.TargetConfig
+import org.lflang.target.property.ClockSyncModeProperty
 import org.lflang.target.property.FedNetInterfaceProperty
+import org.lflang.target.property.PlatformProperty
+import org.lflang.target.property.type.ClockSyncModeType
 import org.lflang.target.property.type.FedNetInterfaceType.FedNetInterface
+import org.lflang.target.property.type.PlatformType
 
 /**
  * This generator creates code for configuring the connections between reactors. This is perhaps the
@@ -40,6 +44,23 @@ class UcConnectionGenerator(
   private val federatedConnectionBundles: List<UcFederatedConnectionBundle>
 
   private val isFederated = currentFederate != null
+
+  private val effectivePlatform: PlatformType.Platform =
+      if (isFederated) {
+        val federatePlatform = currentFederate!!.platform
+        if (federatePlatform == PlatformType.Platform.AUTO)
+            targetConfig!!.get(PlatformProperty.INSTANCE).platform
+        else federatePlatform
+      } else {
+        PlatformType.Platform.AUTO
+      }
+
+  private val clockSyncEnabled: Boolean =
+      if (isFederated)
+          !currentFederate!!.clockSyncParams.disabled &&
+              targetConfig?.getOrDefault(ClockSyncModeProperty.INSTANCE) !=
+                  ClockSyncModeType.ClockSyncMode.OFF
+      else false
 
   private val useIpv6Networking: Boolean =
       if (isFederated)
@@ -454,9 +475,15 @@ class UcConnectionGenerator(
 
   private fun generateFederatedConnectionBundleSelfStruct(bundle: UcFederatedConnectionBundle) =
       with(PrependOperator) {
+        val hasClockSyncChannel =
+            clockSyncEnabled &&
+                effectivePlatform == PlatformType.Platform.ZEPHYR &&
+                bundle.networkChannel.type == NetworkChannelType.TCP_IP
+        val clockSyncChannelField = if (hasClockSyncChannel) "UdpIpChannel clock_sync_channel;" else ""
         """ |typedef struct {
             |  FederatedConnectionBundle super;
        ${"  |  "..bundle.networkChannel.codeType} channel;
+       ${"  |  "..clockSyncChannelField}
        ${"  |  "..bundle.groupedConnections.joinWithLn { generateFederatedConnectionInstance(it) }}
             |  LF_FEDERATED_CONNECTION_BUNDLE_BOOKKEEPING_INSTANCES(${bundle.numInputs(currentFederate!!)}, ${
                 bundle.numOutputs(
@@ -471,10 +498,21 @@ class UcConnectionGenerator(
 
   private fun generateFederatedConnectionBundleCtor(bundle: UcFederatedConnectionBundle) =
       with(PrependOperator) {
+        val hasClockSyncChannel =
+            clockSyncEnabled &&
+                effectivePlatform == PlatformType.Platform.ZEPHYR &&
+                bundle.networkChannel.type == NetworkChannelType.TCP_IP
+        val clockSyncChannelCtor =
+            if (hasClockSyncChannel) bundle.generateClockSyncNetworkChannelCtor(currentFederate!!) else ""
+        val bundleCtorCall =
+            if (hasClockSyncChannel)
+                "LF_FEDERATED_CONNECTION_BUNDLE_CALL_CTOR_WITH_CLOCK_SYNC_CHANNEL(clock_sync_channel);"
+            else "LF_FEDERATED_CONNECTION_BUNDLE_CALL_CTOR();"
         """ |LF_FEDERATED_CONNECTION_BUNDLE_CTOR_SIGNATURE(${bundle.src.codeType}, ${bundle.dest.codeType}) {
             |  LF_FEDERATED_CONNECTION_BUNDLE_CTOR_PREAMBLE();
             |  ${bundle.generateNetworkChannelCtor(currentFederate!!)}
-            |  LF_FEDERATED_CONNECTION_BUNDLE_CALL_CTOR();
+            |  ${clockSyncChannelCtor}
+            |  ${bundleCtorCall}
        ${"  |  "..bundle.groupedConnections.joinWithLn { generateInitializeFederatedConnection(it) }}
             |}
         """
