@@ -148,8 +148,6 @@ class UcGeneratorFederated(context: LFGeneratorContext, scopeProvider: LFGlobalS
         // generate platform specific files
         platformGenerator.generatePlatformFiles()
 
-        messageReporter.nowhere().info("Generating code into directory $srcGenPath")
-
         if (shouldCompileGeneratedCode()) {
           if (!platformGenerator.doCompile(context)) {
             context.finish(GeneratorResult.Status.FAILED, codeMaps)

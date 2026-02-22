@@ -13,22 +13,16 @@ class UcPlatformGeneratorFederated(
 ) : UcPlatformGenerator(generator) {
 
   override val buildPath = srcGenPath.resolve("build")
-  private val effectivePlatform: PlatformType.Platform
+  override val platform: PlatformType.Platform
     get() =
         if (federate.platform == PlatformType.Platform.AUTO)
             targetConfig.get(PlatformProperty.INSTANCE).platform
         else federate.platform
 
-  override val targetName: String =
-      if (effectivePlatform == PlatformType.Platform.ZEPHYR) "zephyr" else federate.codeType
-
-  override val buildTarget: String?
-    get() = if (effectivePlatform == PlatformType.Platform.ZEPHYR) null else super.buildTarget
-
   override fun shouldCleanBuildDirectory(): Boolean =
-      effectivePlatform == PlatformType.Platform.ZEPHYR
+      platform == PlatformType.Platform.ZEPHYR
 
-  override fun supportsInstallTarget(): Boolean = effectivePlatform != PlatformType.Platform.ZEPHYR
+  override val nativeBuildTarget: String = federate.codeType
 
   override fun generatePlatformFiles() {
     val generator = generator as UcGeneratorFederated
@@ -43,9 +37,7 @@ class UcPlatformGeneratorFederated(
             generator.fileConfig)
     val cmakeGenerator = UcCmakeGeneratorFederated(federate, targetConfig, generator.fileConfig)
     val makeGenerator = UcMakeGeneratorFederated(federate, targetConfig, generator.fileConfig)
-    val shouldGenerateNativeBuildFiles = effectivePlatform != PlatformType.Platform.ZEPHYR
-    super.doGeneratePlatformFiles(
-        mainGenerator, cmakeGenerator, makeGenerator, shouldGenerateNativeBuildFiles)
+    super.doGeneratePlatformFiles(mainGenerator, cmakeGenerator, makeGenerator)
 
     generatePlatformSpecificFiles(UcGeneratorFactory.PlatformContext.Federated(federate))
 
