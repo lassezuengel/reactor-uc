@@ -11,6 +11,7 @@ import org.lflang.generator.LFGeneratorContext
 import org.lflang.target.TargetConfig
 import org.lflang.target.property.BuildTypeProperty
 import org.lflang.target.property.type.BuildTypeType.BuildType
+import org.lflang.target.property.type.PlatformType
 import org.lflang.toDefinition
 import org.lflang.toUnixString
 import org.lflang.util.FileUtil
@@ -27,11 +28,26 @@ abstract class UcPlatformGenerator(protected val generator: UcGenerator) {
   protected val mainReactor = generator.mainDef.reactorClass.toDefinition()
   abstract val buildPath: Path
   abstract val srcGenPath: Path
-  abstract val targetName: String
-  open val buildTarget: String?
-    get() = targetName
 
-  protected open fun supportsInstallTarget(): Boolean = true
+  /**
+   * Effective platform for this generator instance.
+   *
+   * This controls whether we follow the native CMake/Make install flow or delegate to
+   * platform-specific tooling (e.g., Zephyr).
+   */
+  protected abstract val platform: PlatformType.Platform
+
+  /**
+   * Native build target name passed to `cmake --build --target <name>`.
+   *
+   * This is intentionally ignored for Zephyr builds, where we build without an explicit target and
+   * let Zephyr's generated build graph choose the default target.
+   */
+  protected abstract val nativeBuildTarget: String
+
+  /** True when native build files and native install flow should be used. */
+  protected val shouldGenerateNativeBuildFiles: Boolean
+    get() = platform != PlatformType.Platform.ZEPHYR
 
   private val relativeBinDir = fileConfig.outPath.relativize(fileConfig.binPath).toUnixString()
 
@@ -65,8 +81,7 @@ abstract class UcPlatformGenerator(protected val generator: UcGenerator) {
   fun doGeneratePlatformFiles(
       mainGenerator: UcMainGenerator,
       cmakeGenerator: UcCmakeGenerator,
-      makeGenerator: UcMakeGenerator,
-      generateNativeBuildFiles: Boolean = true
+      makeGenerator: UcMakeGenerator
   ) {
     val reactorUCEnvPath = System.getenv("REACTOR_UC_PATH")
     if (reactorUCEnvPath == null) {
@@ -96,7 +111,7 @@ abstract class UcPlatformGenerator(protected val generator: UcGenerator) {
 
     FileUtil.writeToFile(
         cmakeGenerator.generateIncludeCmake(ucSources), srcGenPath.resolve("Include.cmake"), true)
-    if (generateNativeBuildFiles) {
+    if (shouldGenerateNativeBuildFiles) {
       FileUtil.writeToFile(
           cmakeGenerator.generateMainCmakeNative(), srcGenPath.resolve("CMakeLists.txt"), true)
     }
@@ -119,7 +134,7 @@ abstract class UcPlatformGenerator(protected val generator: UcGenerator) {
           false)
     }
 
-    if (generateNativeBuildFiles) {
+    if (shouldGenerateNativeBuildFiles) {
       FileUtil.writeToFile(
           makeGenerator.generateMake(ucSources), srcGenPath.resolve("Makefile"), true)
     }
@@ -142,13 +157,14 @@ abstract class UcPlatformGenerator(protected val generator: UcGenerator) {
       val cmakeReturnCode = runCmake(context)
 
       if (cmakeReturnCode == 0 && !onlyGenerateBuildFiles) {
+        val makeTarget = if (shouldGenerateNativeBuildFiles) nativeBuildTarget else null
         // If cmake succeeded, run make
-        val makeCommand = createMakeCommand(buildPath, parallelize, buildTarget)
+        val makeCommand = createMakeCommand(buildPath, parallelize, makeTarget)
         val makeReturnCode =
             UcValidator(fileConfig, messageReporter, codeMaps)
                 .run(makeCommand, context.cancelIndicator)
         var installReturnCode = 0
-        val shouldInstall = supportsInstallTarget()
+        val shouldInstall = shouldGenerateNativeBuildFiles
         if (makeReturnCode == 0) {
           if (shouldInstall) {
             val installCommand = createMakeCommand(buildPath, parallelize, "install")

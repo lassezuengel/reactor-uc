@@ -9,14 +9,9 @@ class UcPlatformGeneratorNonFederated(generator: UcGenerator, override val srcGe
     UcPlatformGenerator(generator) {
 
   override val buildPath = srcGenPath.resolve("build")
-  override val targetName = fileConfig.name
-  private val platform: PlatformType.Platform
+  override val nativeBuildTarget = fileConfig.name
+  override val platform: PlatformType.Platform
     get() = targetConfig.get(PlatformProperty.INSTANCE).platform
-
-  override val buildTarget: String?
-    get() = if (platform == PlatformType.Platform.ZEPHYR) null else super.buildTarget
-
-  override fun supportsInstallTarget(): Boolean = platform != PlatformType.Platform.ZEPHYR
 
   override fun generatePlatformFiles() {
     val numEventsAndReactions = generator.totalNumEventsAndReactions(generator.mainDef.reactor)
@@ -36,8 +31,7 @@ class UcPlatformGeneratorNonFederated(generator: UcGenerator, override val srcGe
 
     val makeGenerator = UcMakeGeneratorNonFederated(mainReactor, targetConfig, generator.fileConfig)
 
-    super.doGeneratePlatformFiles(
-        mainGenerator, cmakeGenerator, makeGenerator, platform != PlatformType.Platform.ZEPHYR)
+    super.doGeneratePlatformFiles(mainGenerator, cmakeGenerator, makeGenerator)
 
     generatePlatformSpecificFiles(UcGeneratorFactory.PlatformContext.Standalone)
   }
