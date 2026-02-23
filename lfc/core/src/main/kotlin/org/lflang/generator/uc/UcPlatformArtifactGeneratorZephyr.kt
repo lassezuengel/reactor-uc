@@ -184,7 +184,7 @@ class UcPlatformArtifactGeneratorZephyr(
         .property("DEBUG_INFO", "y")
         .property("RTT_CONSOLE", "y")
         .property("UART_CONSOLE", "n")
-        .property("LOG_MODE_IMMEDIATE", "y")
+        .property("LOG_MODE_IMMEDIATE", "n")
         .property("LOG", "y")
         .heading("Diagnostics and logging")
         .property("LOG_PROCESS_THREAD", "n")
