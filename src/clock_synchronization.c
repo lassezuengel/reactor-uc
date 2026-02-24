@@ -25,7 +25,9 @@ static void ClockSynchronization_correct_clock(ClockSynchronization* self, Clock
   interval_t clock_offset = owd - (timestamps->t2 - timestamps->t1);
   FederatedEnvironment* env_fed = (FederatedEnvironment*)self->env;
   LF_DEBUG(CLOCK_SYNC, "RTT: " PRINTF_TIME " OWD: " PRINTF_TIME " offset: " PRINTF_TIME, rtt, owd, clock_offset);
-
+  
+  LF_INFO(CLOCK_SYNC, "RTT: %.1f ms OWD: %.1f ms offset: %.1f ms", ((double)rtt) / 1e6, ((double)owd) / 1e6,
+          ((double)clock_offset) / 1e6);
   // The very first iteration of clock sync we possibly step the clock (forwards or backwards)
   if (!self->has_initial_sync) {
     interval_t clock_offset_abs = clock_offset > 0 ? clock_offset : -clock_offset;
