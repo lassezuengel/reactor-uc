@@ -236,6 +236,7 @@ class UcPlatformArtifactGeneratorZephyr(
         .property("SYSTEM_WORKQUEUE_STACK_SIZE", "2048")
         .property("MAIN_STACK_SIZE", "4096")
         .property("LF_TCP_IP_CHANNEL_STACK_SIZE", "2048")
+        .property("HEAP_MEM_POOL_SIZE", "1024")
         .property("THREAD_CUSTOM_DATA", "y")
         .comment("Enable floating point formatting/logging support.")
         .comment("This increases code size, so feel free to disable if not needed.")
