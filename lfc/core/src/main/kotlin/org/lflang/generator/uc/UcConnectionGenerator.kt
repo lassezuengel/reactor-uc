@@ -479,7 +479,8 @@ class UcConnectionGenerator(
             clockSyncEnabled &&
                 effectivePlatform == PlatformType.Platform.ZEPHYR &&
                 bundle.networkChannel.type == NetworkChannelType.TCP_IP
-        val clockSyncChannelField = if (hasClockSyncChannel) "UdpIpChannel clock_sync_channel;" else ""
+        val clockSyncChannelField =
+            if (hasClockSyncChannel) "UdpIpChannel clock_sync_channel;" else ""
         """ |typedef struct {
             |  FederatedConnectionBundle super;
        ${"  |  "..bundle.networkChannel.codeType} channel;
@@ -503,7 +504,8 @@ class UcConnectionGenerator(
                 effectivePlatform == PlatformType.Platform.ZEPHYR &&
                 bundle.networkChannel.type == NetworkChannelType.TCP_IP
         val clockSyncChannelCtor =
-            if (hasClockSyncChannel) bundle.generateClockSyncNetworkChannelCtor(currentFederate!!) else ""
+            if (hasClockSyncChannel) bundle.generateClockSyncNetworkChannelCtor(currentFederate!!)
+            else ""
         val bundleCtorCall =
             if (hasClockSyncChannel)
                 "LF_FEDERATED_CONNECTION_BUNDLE_CALL_CTOR_WITH_CLOCK_SYNC_CHANNEL(clock_sync_channel);"

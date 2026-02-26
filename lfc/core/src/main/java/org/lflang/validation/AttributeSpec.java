@@ -272,6 +272,10 @@ public class AttributeSpec {
     ATTRIBUTE_SPECS_BY_NAME.put(
         "buffer",
         new AttributeSpec(List.of(new AttrParamSpec(VALUE_ATTR, AttrParamType.INT, false))));
+    // @board("value")
+    ATTRIBUTE_SPECS_BY_NAME.put(
+      "board",
+      new AttributeSpec(List.of(new AttrParamSpec(VALUE_ATTR, AttrParamType.STRING, false))));
     // @interface_tcp(name="string", address="string") e.g. @interface:tcp(name="if1",
     // address="127.0.0.1")
 

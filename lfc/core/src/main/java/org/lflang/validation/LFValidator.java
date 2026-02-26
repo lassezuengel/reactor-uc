@@ -104,6 +104,8 @@ import org.lflang.lf.WidthSpec;
 import org.lflang.lf.WidthTerm;
 import org.lflang.target.Target;
 import org.lflang.target.TargetConfig;
+import org.lflang.target.property.PlatformProperty;
+import org.lflang.target.property.type.PlatformType.Platform;
 import org.lflang.util.FileUtil;
 
 /**
@@ -1017,6 +1019,48 @@ public class LFValidator extends BaseLFValidator {
     // Above generic check is not sufficient for maxwait.
     if (name.equals("maxwait")) {
       checkMaxWaitAttribute(attr);
+    } else if (name.equals("board")) {
+      checkBoardAttribute(attr);
+    }
+  }
+
+  private void checkBoardAttribute(Attribute attr) {
+    var container = attr.eContainer();
+    if (!(container instanceof Instantiation instantiation)) {
+      warning(
+          "board attribute can only be used in a federate instantiation.",
+          attr,
+          Literals.ATTRIBUTE__ATTR_NAME);
+      return;
+    }
+    var top = instantiation.eContainer();
+    if (!(top instanceof Reactor) || !((Reactor) top).isFederated()) {
+      warning(
+          "board attribute can only be used on top-level federate instantiations in a federated reactor.",
+          attr,
+          Literals.ATTRIBUTE__ATTR_NAME);
+      return;
+    }
+
+    var federatePlatform = AttributeUtils.getFederatePlatform(instantiation);
+    if (federatePlatform != Platform.ZEPHYR) {
+      if (federatePlatform == Platform.AUTO) {
+        var platform =
+            new TargetConfig(attr.eResource(), GeneratorArguments.none(), getErrorReporter())
+                .getOrDefault(PlatformProperty.INSTANCE)
+                .platform();
+        if (platform != Platform.ZEPHYR) {
+          warning(
+              "board attribute is only effective for Zephyr federates.",
+              attr,
+              Literals.ATTRIBUTE__ATTR_NAME);
+        }
+      } else {
+        warning(
+            "board attribute is only effective for Zephyr federates.",
+            attr,
+            Literals.ATTRIBUTE__ATTR_NAME);
+      }
     }
   }
 

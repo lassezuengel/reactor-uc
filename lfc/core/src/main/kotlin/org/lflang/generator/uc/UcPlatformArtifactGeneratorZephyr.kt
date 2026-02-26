@@ -45,8 +45,15 @@ class UcPlatformArtifactGeneratorZephyr(
   override fun generate() {
     val platformOptions = targetConfig.get(PlatformProperty.INSTANCE)
     val boardFromTarget = platformOptions.board().value()
+    // TODO: The "@board" attribute was added as a quick and dirty hack for convenience and should
+    // be removed in favor of a more robust solution for specifying different targets for different
+    // federates.
+    val boardFromFederate =
+        (context as? UcGeneratorFactory.PlatformContext.Federated)?.federate?.board
+    val selectedBoard = boardFromFederate ?: boardFromTarget
     val defaultBoard =
-        boardFromTarget?.takeIf { platformOptions.board().setByUser() } ?: "nrf52840dk_nrf52840"
+        selectedBoard?.takeIf { boardFromFederate != null || platformOptions.board().setByUser() }
+            ?: "nrf52840dk_nrf52840"
     val cmake =
         generateCmake(
             init =
@@ -89,7 +96,7 @@ class UcPlatformArtifactGeneratorZephyr(
           is UcGeneratorFactory.PlatformContext.Federated -> generatePrjConfFederated(context)
         }
 
-    val boardName = platformOptions.board().value()?.lowercase()
+    val boardName = selectedBoard?.lowercase()
     val boardSpecificConfig = boardConfigProvider.configFor(boardName)
     val prjConf =
         listOf(basePrjConf, boardSpecificConfig).filterNotNull().joinToString(separator = "\n\n")
