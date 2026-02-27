@@ -105,10 +105,8 @@ void lf_init_connection_manager(void) {
     if (iface && net_if_is_up(iface)) {
       if (net_if_ipv6_get_global_addr(NET_ADDR_PREFERRED, &iface)) {
         k_sem_give(&run_lf_fed);
-      } else {
       }
     } // else: just keep waiting for the event callback to trigger when the interface comes up
-
   } else {
     // Network manager is not enabled. This is usually not intended behavior,
     // but we will just signal the semaphore immediately in this case to avoid blocking forever.
