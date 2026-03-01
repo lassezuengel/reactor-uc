@@ -1036,7 +1036,8 @@ public class LFValidator extends BaseLFValidator {
     var top = instantiation.eContainer();
     if (!(top instanceof Reactor) || !((Reactor) top).isFederated()) {
       warning(
-          "board attribute can only be used on top-level federate instantiations in a federated reactor.",
+          "board attribute can only be used on top-level federate instantiations in a federated"
+              + " reactor.",
           attr,
           Literals.ATTRIBUTE__ATTR_NAME);
       return;

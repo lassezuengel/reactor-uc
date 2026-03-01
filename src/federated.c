@@ -282,8 +282,8 @@ void FederatedConnectionBundle_ctor(FederatedConnectionBundle* self, Reactor* pa
   self->index = index;
   self->net_channel->register_receive_callback(self->net_channel, FederatedConnectionBundle_msg_received_cb, self);
   if (self->clock_sync_channel != NULL) {
-    self->clock_sync_channel->register_receive_callback(self->clock_sync_channel, FederatedConnectionBundle_msg_received_cb,
-                                                        self);
+    self->clock_sync_channel->register_receive_callback(self->clock_sync_channel,
+                                                        FederatedConnectionBundle_msg_received_cb, self);
   }
 }
 
