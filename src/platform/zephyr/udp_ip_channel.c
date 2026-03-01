@@ -70,10 +70,9 @@ static bool UdpIpChannel_is_connected(NetworkChannel* untyped_self) {
 }
 
 static void _UdpIpChannel_spawn_worker_thread(UdpIpChannel* self) {
-  self->worker_thread_id =
-      k_thread_create(&self->worker_thread, self->worker_thread_stack, K_KERNEL_STACK_SIZEOF(self->worker_thread_stack),
-                      _UdpIpChannel_worker_thread, self, NULL, NULL, UDP_IP_CHANNEL_ZEPHYR_THREAD_PRIORITY, 0,
-                      K_NO_WAIT);
+  self->worker_thread_id = k_thread_create(
+      &self->worker_thread, self->worker_thread_stack, K_KERNEL_STACK_SIZEOF(self->worker_thread_stack),
+      _UdpIpChannel_worker_thread, self, NULL, NULL, UDP_IP_CHANNEL_ZEPHYR_THREAD_PRIORITY, 0, K_NO_WAIT);
   validate(self->worker_thread_id != NULL);
   (void)k_thread_name_set(self->worker_thread_id, "lf_udpip_rx");
   self->worker_thread_started = true;

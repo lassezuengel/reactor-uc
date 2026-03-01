@@ -1,5 +1,5 @@
-#ifndef REACTOR_UC_UDP_IP_CHANNEL_H
-#define REACTOR_UC_UDP_IP_CHANNEL_H
+#ifndef REACTOR_UC_PLATFORM_ZEPHYR_UDP_IP_CHANNEL_H
+#define REACTOR_UC_PLATFORM_ZEPHYR_UDP_IP_CHANNEL_H
 
 #include <nanopb/pb.h>
 #include <pthread.h>
