@@ -1,10 +1,14 @@
-package org.lflang.generator.uc
+package org.lflang.generator.uc.zephyr
 
 import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.collections.buildList
 import kotlin.math.max
 import org.lflang.generator.ZephyrConfig
+import org.lflang.generator.uc.UcGeneratorFactory
+import org.lflang.generator.uc.UcPlatformArtifactGenerator
+import org.lflang.generator.uc.UcTcpIpInterface
+import org.lflang.generator.uc.UcConnectionGenerator
 import org.lflang.lf.Instantiation
 import org.lflang.target.TargetConfig
 import org.lflang.target.property.FedNetInterfaceProperty
