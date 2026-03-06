@@ -43,9 +43,7 @@ object UcNetworkInterfaceFactory {
 
   private fun createDefaultInterface(useIpv6: Boolean): UcNetworkInterface =
       if (useIpv6) {
-        val autoAddr = UcZephyrIpv6Allocator.nextAddress()
-        IpAddressManager.acquireIp(autoAddr)
-        UcZephyrIpv6Allocator.markAsUsed(autoAddr)
+        val autoAddr = IpAddressManager.acquireNextIpv6Address()
         UcTcpIpInterface(ipAddress = autoAddr)
       } else {
         UcTcpIpInterface(ipAddress = IPAddress.fromString("127.0.0.1"))
@@ -125,10 +123,12 @@ class UcTcpIpInterface(private val ipAddress: IPAddress, name: String? = null) :
             }
             address
           } else {
-            if (useIpv6) UcZephyrIpv6Allocator.nextAddress() else IPAddress.fromString("127.0.0.1")
+            if (useIpv6) IpAddressManager.acquireNextIpv6Address()
+            else IPAddress.fromString("127.0.0.1")
           }
-      IpAddressManager.acquireIp(ip)
-      UcZephyrIpv6Allocator.markAsUsed(ip)
+      if (!(useIpv6 && address == null)) {
+        IpAddressManager.acquireIp(ip)
+      }
       return UcTcpIpInterface(ip, name)
     }
   }
@@ -196,10 +196,12 @@ class UcCoapUdpIpInterface(private val ipAddress: IPAddress, name: String? = nul
             }
             address
           } else {
-            if (useIpv6) UcZephyrIpv6Allocator.nextAddress() else IPAddress.fromString("127.0.0.1")
+            if (useIpv6) IpAddressManager.acquireNextIpv6Address()
+            else IPAddress.fromString("127.0.0.1")
           }
-      IpAddressManager.acquireIp(ip)
-      UcZephyrIpv6Allocator.markAsUsed(ip)
+      if (!(useIpv6 && address == null)) {
+        IpAddressManager.acquireIp(ip)
+      }
       return UcCoapUdpIpInterface(ip, name)
     }
   }

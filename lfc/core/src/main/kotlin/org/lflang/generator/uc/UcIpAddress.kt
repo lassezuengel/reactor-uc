@@ -69,7 +69,6 @@ sealed class IPAddress {
           }
           IPv4(octets.dropLast(1).joinToString(".") + "." + (lastOctet + count))
         }
-
         is IPv6 -> {
           val segments = address.address.split(":")
           val lastSegment = BigInteger(segments.last(), 16)
@@ -107,8 +106,28 @@ class IpPortManager {
 }
 
 object IpAddressManager {
+  private val defaultIpv6Start = IPAddress.fromString("fd01::1")
   private val usedIps = mutableSetOf<IPAddress>()
   private val portManagers = mutableMapOf<IPAddress, IpPortManager>()
+  private var nextIpv6Address = defaultIpv6Start
+
+  @Synchronized
+  fun resetIpv6Allocator() {
+    nextIpv6Address = defaultIpv6Start
+  }
+
+  @Synchronized
+  fun acquireNextIpv6Address(): IPAddress {
+    while (true) {
+      val candidate = nextIpv6Address
+      nextIpv6Address = IPAddress.increment(nextIpv6Address, 1)
+
+      if (!usedIps.contains(candidate)) {
+        usedIps.add(candidate)
+        return candidate
+      }
+    }
+  }
 
   @Synchronized
   fun acquireIp(ip: IPAddress) {
@@ -130,5 +149,3 @@ object IpAddressManager {
     }
   }
 }
-
-class UcIpAddress {}

@@ -252,7 +252,7 @@ class UcConnectionGenerator(
     // Only pass through all federates and add NetworkInterface objects to them once.
     if (isFederated && !federateInterfacesInitialized) {
       if (useIpv6Networking) {
-        UcZephyrIpv6Allocator.reset()
+        IpAddressManager.resetIpv6Allocator()
       }
       for (fed in allFederates) {
         UcNetworkInterfaceFactory.createInterfaces(fed, useIpv6Networking).forEach {
