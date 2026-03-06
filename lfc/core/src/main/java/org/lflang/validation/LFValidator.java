@@ -104,9 +104,12 @@ import org.lflang.lf.WidthSpec;
 import org.lflang.lf.WidthTerm;
 import org.lflang.target.Target;
 import org.lflang.target.TargetConfig;
+import org.lflang.target.property.FedNetInterfaceProperty;
 import org.lflang.target.property.PlatformProperty;
+import org.lflang.target.property.type.FedNetInterfaceType.FedNetInterface;
 import org.lflang.target.property.type.PlatformType.Platform;
 import org.lflang.util.FileUtil;
+import org.lflang.util.StringUtil;
 
 /**
  * Custom validation checks for Lingua Franca programs.
@@ -1021,9 +1024,15 @@ public class LFValidator extends BaseLFValidator {
       checkMaxWaitAttribute(attr);
     } else if (name.equals("board")) {
       checkBoardAttribute(attr);
+    } else if(name.equals("interface_tcp")) {
+      checkInterfaceTcpAttribute(attr);
     }
   }
 
+  /**
+   * Check the validity of the board attribute, which is only allowed for Zephyr federates.
+   * @param attr
+   */
   private void checkBoardAttribute(Attribute attr) {
     var container = attr.eContainer();
     if (!(container instanceof Instantiation instantiation)) {
@@ -1062,6 +1071,56 @@ public class LFValidator extends BaseLFValidator {
             attr,
             Literals.ATTRIBUTE__ATTR_NAME);
       }
+    }
+  }
+
+  /**
+   * Check the validity of the interface_tcp attribute, which is only allowed for federates and should be a valid IP address or host name.
+   */
+  private void checkInterfaceTcpAttribute(Attribute attr) {
+    var container = attr.eContainer();
+    if (!(container instanceof Instantiation instantiation)) {
+      warning(
+          "interface_tcp attribute can only be used in a federate instantiation.",
+          attr,
+          Literals.ATTRIBUTE__ATTR_NAME);
+      return;
+    }
+
+    var top = instantiation.eContainer();
+    if (!(top instanceof Reactor) || !((Reactor) top).isFederated()) {
+      warning(
+          "interface_tcp attribute can only be used on top-level federate instantiations in a federated"
+              + " reactor.",
+          attr,
+          Literals.ATTRIBUTE__ATTR_NAME);
+      return;
+    }
+
+    var addressParam = AttributeUtils.getAttributeParameter(attr, "address");
+    if (addressParam == null || addressParam.getValue() == null) {
+      // Nothing to check.
+      return;
+    }
+
+    var addr = StringUtil.removeQuotes(addressParam.getValue());
+    var isIpv4 = addr.matches(IPV4_REGEX);
+    var isIpv6 = addr.matches(IPV6_REGEX);
+    var isHostOrFqn = addr.matches(HOST_OR_FQN_REGEX);
+    if (!isIpv4 && !isIpv6 && !isHostOrFqn) {
+      error(
+          "Invalid IP address or host name.",
+          addressParam,
+          Literals.ATTR_PARM__VALUE);
+    } else {
+      var fedNetInterface = new TargetConfig(attr.eResource(), GeneratorArguments.none(), getErrorReporter())
+          .getOrDefault(FedNetInterfaceProperty.INSTANCE);
+      if (fedNetInterface == FedNetInterface.SICSLOWPAN && !isIpv6) {
+        error(
+            "interface_tcp attribute for sicslowpan property only accepts IPv6 addresses.",
+            addressParam,
+            Literals.ATTR_PARM__VALUE);
+        }
     }
   }
 

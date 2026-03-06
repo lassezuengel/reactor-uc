@@ -26,7 +26,7 @@ private fun parseConfiguredIpAddress(
       try {
         IPAddress.fromString(address)
       } catch (e: IllegalArgumentException) {
-        messageReporter.at(attr).error("Invalid IP address '$address': ${e.message}")
+        messageReporter.at(attr).error(e.message)
         return null
       }
 

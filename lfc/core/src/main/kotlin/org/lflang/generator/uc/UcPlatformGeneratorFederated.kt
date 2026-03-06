@@ -19,8 +19,7 @@ class UcPlatformGeneratorFederated(
             targetConfig.get(PlatformProperty.INSTANCE).platform
         else federate.platform
 
-  override fun shouldCleanBuildDirectory(): Boolean =
-      platform == PlatformType.Platform.ZEPHYR
+  override fun shouldCleanBuildDirectory(): Boolean = platform == PlatformType.Platform.ZEPHYR
 
   override val nativeBuildTarget: String = federate.codeType
 

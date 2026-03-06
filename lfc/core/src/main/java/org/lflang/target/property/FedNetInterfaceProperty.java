@@ -64,7 +64,7 @@ public final class FedNetInterfaceProperty
       if (platform != Platform.ZEPHYR) {
         reporter
             .at(pair, Literals.KEY_VALUE_PAIR__VALUE)
-            .warning( // TODO: should be error
+            .error(
                 "The sicslowpan network interface requires the platform target property to be set"
                     + " to \"zephyr\".");
       }

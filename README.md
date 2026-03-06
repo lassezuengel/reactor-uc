@@ -1,4 +1,4 @@
-Reactor Micro-C 
+Reactor Micro-C
 ====================
 
 `reactor-uc` is a task scheduling runtime for Lingua Franca, targeted at embedded and resource-constrained systems. Please refer to the
@@ -32,7 +32,7 @@ export REACTOR_UC_PATH=$(pwd)
 
 ### Native (macOS and Linux)
 `reactor-uc` can also run natively on a host system based on Linux or macOS. This is very useful for developing and testing applications
-without the target hardware. By setting the platform target property in your LF program to `Native` the compiler will automatically generate 
+without the target hardware. By setting the platform target property in your LF program to `Native`, the compiler will automatically generate
 a CMake project and compile it natively. E.g.
 
 ```sh
@@ -40,7 +40,7 @@ cat > HelloWorld.lf << EOF
 target uC {
   platform: Native
 }
- 
+
 main reactor {
   reaction(startup) {=
     printf("Hello World!\n");
@@ -57,8 +57,8 @@ bin/HelloWorld
 **Template Repository:** [https://github.com/lf-lang/lf-zephyr-uc-template/](https://github.com/lf-lang/lf-zephyr-uc-template/)
 
 Compile and run a simple test on Zephyr. This requires a correctly configured
-Zehyr environment, with West installed in a Python virtual environment, is
-activated. Inspect `.github/actions/zephyr/action.yml` for an example of setting up your Zephyr workspace. 
+Zephyr environment, with West installed in a Python virtual environment, is
+activated. Inspect `.github/actions/zephyr/action.yml` for an example of setting up your Zephyr workspace.
 
 First a simple HelloWorld on the `native_posix` target:
 ```shell
@@ -72,7 +72,7 @@ cd examples/zephyr/blinky
 west build -b frdm_k64f -p always
 west flash
 ```
-### RIOT 
+### RIOT
 
 **Template Repository:** [https://github.com/lf-lang/lf-riot-uc-template/](https://github.com/lf-lang/lf-riot-uc-template/)
 
@@ -101,7 +101,7 @@ make
 ### Patmos
 
 To install Patmos, follow instructions in [https://github.com/t-crest/patmos/](https://github.com/t-crest/patmos) readme file.
-Then clone template repository as a sibling folder to this repo by running these commands: 
+Then clone template repository as a sibling folder to this repo by running these commands:
 ```shell
 cd ..
 git clone --branch reactor-uc https://github.com/lf-lang/lf-patmos-template.git lf-patmos-template
@@ -155,13 +155,13 @@ make lf-test
 
 This depends on having the `timeout` utility installed. For macOS users run `brew install coreutils`.
 
-Run platform related tests with 
+Run platform related tests with
 ```sh
 make platform-test
 ```
 
 Run all examples with
-```sh 
+```sh
 make examples
 ```
 
