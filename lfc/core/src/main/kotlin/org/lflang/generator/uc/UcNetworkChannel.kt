@@ -16,38 +16,41 @@ enum class NetworkChannelType {
 }
 
 object UcNetworkInterfaceFactory {
-  fun createInterfaces(federate: UcFederate, useIpv6: Boolean): List<UcNetworkInterface> {
+  fun createInterfaces(
+      federate: UcFederate,
+      allocator: NetworkInterfaceAllocator
+  ): List<UcNetworkInterface> {
     val attrs: List<Attribute> = getInterfaceAttributes(federate.inst)
     return if (attrs.isEmpty()) {
-      listOf(createDefaultInterface(useIpv6))
+      listOf(createDefaultInterface(federate, allocator))
     } else {
-      attrs.map { createInterfaceFromAttribute(federate, it, useIpv6) }
+      attrs.map { createInterfaceFromAttribute(federate, it, allocator) }
     }
   }
 
   private fun createInterfaceFromAttribute(
       federate: UcFederate,
       attr: Attribute,
-      useIpv6: Boolean
+      allocator: NetworkInterfaceAllocator
   ): UcNetworkInterface {
     val protocol = attr.attrName.substringAfter("_")
     return when (protocol) {
-      "tcp" -> UcTcpIpInterface.fromAttribute(federate, attr, useIpv6)
+      "tcp" -> UcTcpIpInterface.fromAttribute(federate, attr, allocator)
       "uart" -> UcUARTInterface.fromAttribute(federate, attr)
-      "coap" -> UcCoapUdpIpInterface.fromAttribute(federate, attr, useIpv6)
+      "coap" -> UcCoapUdpIpInterface.fromAttribute(federate, attr, allocator)
       "s4noc" -> UcS4NocInterface.fromAttribute(federate, attr)
       "custom" -> UcCustomInterface.fromAttribute(federate, attr)
       else -> throw IllegalArgumentException("Unrecognized interface attribute $attr")
     }
   }
 
-  private fun createDefaultInterface(useIpv6: Boolean): UcNetworkInterface =
-      if (useIpv6) {
-        val autoAddr = IpAddressManager.acquireNextIpv6Address()
-        UcTcpIpInterface(ipAddress = autoAddr)
-      } else {
-        UcTcpIpInterface(ipAddress = IPAddress.fromString("127.0.0.1"))
-      }
+  private fun createDefaultInterface(
+      federate: UcFederate,
+      allocator: NetworkInterfaceAllocator
+  ): UcNetworkInterface {
+    val ip = allocator.allocateAddress(federate, null) { IPAddress.fromString("127.0.0.1") }
+    return UcTcpIpInterface(ipAddress = ip)
+  }
 }
 
 // A NetworkEndpoint is a communication endpoint located at the UcNetworkInterface of a federate.
@@ -111,24 +114,13 @@ class UcTcpIpInterface(private val ipAddress: IPAddress, name: String? = null) :
   }
 
   companion object {
-    fun fromAttribute(federate: UcFederate, attr: Attribute, useIpv6: Boolean): UcTcpIpInterface {
-      val address = attr.getParamString("address")
+    fun fromAttribute(
+        federate: UcFederate,
+        attr: Attribute,
+        allocator: NetworkInterfaceAllocator
+    ): UcTcpIpInterface {
       val name = attr.getParamString("name")
-      val ip =
-          if (address != null) {
-            var address = IPAddress.fromString(address)
-
-            if (federate.isBank) {
-              address = IPAddress.increment(address, federate.bankIdx - 1)
-            }
-            address
-          } else {
-            if (useIpv6) IpAddressManager.acquireNextIpv6Address()
-            else IPAddress.fromString("127.0.0.1")
-          }
-      if (!(useIpv6 && address == null)) {
-        IpAddressManager.acquireIp(ip)
-      }
+      val ip = allocator.allocateAddress(federate, attr) { IPAddress.fromString("127.0.0.1") }
       return UcTcpIpInterface(ip, name)
     }
   }
@@ -160,7 +152,7 @@ class UcUARTInterface(
       val dataBits = UARTDataBitsFromInteger(attr.getParamInt("data_bits") ?: 8)
       val parity = UARTParityBits.valueOf(attr.getParamString("parity").toString())
       val uartStopBits = UARTStopBitsFromInteger(attr.getParamInt("stop_bits") ?: 1)
-      val async = attr.getParamString("async").toBoolean() ?: true
+      val async = attr.getParamString("async").toBoolean()
       val name = attr.getParamString("name")
       UARTDeviceManager.reserve(uartDevice)
       return UcUARTInterface(uartDevice, baudRate, dataBits, parity, uartStopBits, async, name)
@@ -183,25 +175,10 @@ class UcCoapUdpIpInterface(private val ipAddress: IPAddress, name: String? = nul
     fun fromAttribute(
         federate: UcFederate,
         attr: Attribute,
-        useIpv6: Boolean
+        allocator: NetworkInterfaceAllocator
     ): UcCoapUdpIpInterface {
-      val address = attr.getParamString("address")
       val name = attr.getParamString("name")
-      val ip =
-          if (address != null) {
-            var address = IPAddress.fromString(address)
-
-            if (federate.isBank) {
-              address = IPAddress.increment(address, federate.bankIdx - 1)
-            }
-            address
-          } else {
-            if (useIpv6) IpAddressManager.acquireNextIpv6Address()
-            else IPAddress.fromString("127.0.0.1")
-          }
-      if (!(useIpv6 && address == null)) {
-        IpAddressManager.acquireIp(ip)
-      }
+      val ip = allocator.allocateAddress(federate, attr) { IPAddress.fromString("127.0.0.1") }
       return UcCoapUdpIpInterface(ip, name)
     }
   }

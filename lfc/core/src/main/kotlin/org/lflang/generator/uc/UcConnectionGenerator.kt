@@ -67,6 +67,9 @@ class UcConnectionGenerator(
           targetConfig?.get(FedNetInterfaceProperty.INSTANCE) == FedNetInterface.SICSLOWPAN
       else false
 
+  private val networkAllocator: NetworkInterfaceAllocator =
+      if (useIpv6Networking) Ipv6NetworkInterfaceAllocator() else Ipv4NetworkInterfaceAllocator()
+
   /**
    * Given a LF connection and possibly the list of federates of the program. Create all the
    * ConnectionChannels found within the LF Connection. This must handle multiports, banks, iterated
@@ -251,11 +254,9 @@ class UcConnectionGenerator(
     }
     // Only pass through all federates and add NetworkInterface objects to them once.
     if (isFederated && !federateInterfacesInitialized) {
-      if (useIpv6Networking) {
-        IpAddressManager.resetIpv6Allocator()
-      }
+      networkAllocator.initialize(allFederates)
       for (fed in allFederates) {
-        UcNetworkInterfaceFactory.createInterfaces(fed, useIpv6Networking).forEach {
+        UcNetworkInterfaceFactory.createInterfaces(fed, networkAllocator).forEach {
           fed.addInterface(it)
         }
       }
@@ -272,7 +273,7 @@ class UcConnectionGenerator(
     if (isFederated) {
       // Only parse out federated connection bundles once for the very first federate
       if (allFederatedConnectionBundles.isEmpty()) {
-        createFederatedConnectionBundles(grouped, useIpv6Networking)
+        createFederatedConnectionBundles(grouped, networkAllocator.usesIpv6)
       }
 
       // Filter out the relevant bundles for this federate

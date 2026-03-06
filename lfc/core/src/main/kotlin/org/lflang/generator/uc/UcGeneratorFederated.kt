@@ -130,30 +130,36 @@ class UcGeneratorFederated(context: LFGeneratorContext, scopeProvider: LFGlobalS
     }
 
     for (ucFederate in federates) {
-      clearStateFromPreviousFederate()
+      try {
+        clearStateFromPreviousFederate()
 
-      val srcGenPath =
-          if (ucFederate.isBank) {
-            fileConfig.srcGenPath.resolve("${ucFederate.inst.name}_${ucFederate.bankIdx}")
-          } else {
-            fileConfig.srcGenPath.resolve(ucFederate.inst.name)
-          }
+        val srcGenPath =
+            if (ucFederate.isBank) {
+              fileConfig.srcGenPath.resolve("${ucFederate.inst.name}_${ucFederate.bankIdx}")
+            } else {
+              fileConfig.srcGenPath.resolve(ucFederate.inst.name)
+            }
 
-      val platformGenerator = UcPlatformGeneratorFederated(this, srcGenPath, ucFederate)
-      val res = doGenerateFederate(ucFederate.inst.eResource()!!, context, srcGenPath, ucFederate)
+        val platformGenerator = UcPlatformGeneratorFederated(this, srcGenPath, ucFederate)
+        val res = doGenerateFederate(ucFederate.inst.eResource()!!, context, srcGenPath, ucFederate)
 
-      if (res == GeneratorResult.Status.FAILED) {
-        return
-      } else {
-        // generate platform specific files
-        platformGenerator.generatePlatformFiles()
+        if (res == GeneratorResult.Status.FAILED) {
+          return
+        } else {
+          // generate platform specific files
+          platformGenerator.generatePlatformFiles()
 
-        if (shouldCompileGeneratedCode()) {
-          if (!platformGenerator.doCompile(context)) {
-            context.finish(GeneratorResult.Status.FAILED, codeMaps)
-            return
+          if (shouldCompileGeneratedCode()) {
+            if (!platformGenerator.doCompile(context)) {
+              context.finish(GeneratorResult.Status.FAILED, codeMaps)
+              return
+            }
           }
         }
+      } catch (ex: NetworkInterfaceAllocationException) {
+        reportNetworkInterfaceFailure(ex)
+        context.finish(GeneratorResult.Status.FAILED, codeMaps)
+        return
       }
     }
     if (platform.platform == PlatformType.Platform.NATIVE &&
@@ -187,5 +193,15 @@ class UcGeneratorFederated(context: LFGeneratorContext, scopeProvider: LFGlobalS
 
     FileUtil.writeToFile(headerCodeMap.generatedCode, srcGenPath.resolve(headerFile), true)
     FileUtil.writeToFile(federateCodeMap.generatedCode, srcGenPath.resolve(sourceFile), true)
+  }
+
+  private fun reportNetworkInterfaceFailure(ex: NetworkInterfaceAllocationException) {
+    val reporter =
+        when {
+          ex.attribute != null -> messageReporter.at(ex.attribute)
+          ex.federate != null -> messageReporter.at(ex.federate.inst)
+          else -> messageReporter.nowhere()
+        }
+    reporter.error(ex.message ?: "Failed to assign network interface addresses.")
   }
 }
