@@ -2,6 +2,7 @@ package org.lflang.generator.uc
 
 import org.lflang.AttributeUtils.getInterfaceAttributes
 import org.lflang.AttributeUtils.getLinkAttribute
+import org.lflang.MessageReporter
 import org.lflang.generator.uc.NetworkChannelType.*
 import org.lflang.lf.Attribute
 
@@ -15,26 +16,60 @@ enum class NetworkChannelType {
   NONE
 }
 
+private fun parseConfiguredIpAddress(
+    address: String,
+    federate: UcFederate,
+    attr: Attribute,
+    messageReporter: MessageReporter
+): IPAddress? {
+  val parsedAddress =
+      try {
+        IPAddress.fromString(address)
+      } catch (e: IllegalArgumentException) {
+        messageReporter.at(attr).error("Invalid IP address '$address': ${e.message}")
+        return null
+      }
+
+  if (!federate.isBank) {
+    return parsedAddress
+  }
+
+  return try {
+    IPAddress.increment(parsedAddress, federate.bankIdx - 1)
+  } catch (e: IllegalArgumentException) {
+    messageReporter
+        .at(attr)
+        .error(
+            "Unable to increment IP address '$address' for bank index ${federate.bankIdx}: ${e.message}")
+    null
+  }
+}
+
 object UcNetworkInterfaceFactory {
-  fun createInterfaces(federate: UcFederate, useIpv6: Boolean): List<UcNetworkInterface> {
+  fun createInterfaces(
+      federate: UcFederate,
+      useIpv6: Boolean,
+      messageReporter: MessageReporter
+  ): List<UcNetworkInterface> {
     val attrs: List<Attribute> = getInterfaceAttributes(federate.inst)
     return if (attrs.isEmpty()) {
       listOf(createDefaultInterface(useIpv6))
     } else {
-      attrs.map { createInterfaceFromAttribute(federate, it, useIpv6) }
+      attrs.map { createInterfaceFromAttribute(federate, it, useIpv6, messageReporter) }
     }
   }
 
   private fun createInterfaceFromAttribute(
       federate: UcFederate,
       attr: Attribute,
-      useIpv6: Boolean
+      useIpv6: Boolean,
+      messageReporter: MessageReporter
   ): UcNetworkInterface {
     val protocol = attr.attrName.substringAfter("_")
     return when (protocol) {
-      "tcp" -> UcTcpIpInterface.fromAttribute(federate, attr, useIpv6)
+      "tcp" -> UcTcpIpInterface.fromAttribute(federate, attr, useIpv6, messageReporter)
       "uart" -> UcUARTInterface.fromAttribute(federate, attr)
-      "coap" -> UcCoapUdpIpInterface.fromAttribute(federate, attr, useIpv6)
+      "coap" -> UcCoapUdpIpInterface.fromAttribute(federate, attr, useIpv6, messageReporter)
       "s4noc" -> UcS4NocInterface.fromAttribute(federate, attr)
       "custom" -> UcCustomInterface.fromAttribute(federate, attr)
       else -> throw IllegalArgumentException("Unrecognized interface attribute $attr")
@@ -43,9 +78,7 @@ object UcNetworkInterfaceFactory {
 
   private fun createDefaultInterface(useIpv6: Boolean): UcNetworkInterface =
       if (useIpv6) {
-        val autoAddr = UcZephyrIpv6Allocator.nextAddress()
-        IpAddressManager.acquireIp(autoAddr)
-        UcZephyrIpv6Allocator.markAsUsed(autoAddr)
+        val autoAddr = IpAddressManager.acquireNextIpv6Address()
         UcTcpIpInterface(ipAddress = autoAddr)
       } else {
         UcTcpIpInterface(ipAddress = IPAddress.fromString("127.0.0.1"))
@@ -113,22 +146,25 @@ class UcTcpIpInterface(private val ipAddress: IPAddress, name: String? = null) :
   }
 
   companion object {
-    fun fromAttribute(federate: UcFederate, attr: Attribute, useIpv6: Boolean): UcTcpIpInterface {
+    fun fromAttribute(
+        federate: UcFederate,
+        attr: Attribute,
+        useIpv6: Boolean,
+        messageReporter: MessageReporter
+    ): UcTcpIpInterface {
       val address = attr.getParamString("address")
       val name = attr.getParamString("name")
+      val configuredIp =
+          address?.let { parseConfiguredIpAddress(it, federate, attr, messageReporter) }
+      val isAutoAssigned = configuredIp == null && useIpv6
       val ip =
-          if (address != null) {
-            var address = IPAddress.fromString(address)
+          configuredIp
+              ?: if (useIpv6) IpAddressManager.acquireNextIpv6Address()
+              else IPAddress.fromString("127.0.0.1")
 
-            if (federate.isBank) {
-              address = IPAddress.increment(address, federate.bankIdx - 1)
-            }
-            address
-          } else {
-            if (useIpv6) UcZephyrIpv6Allocator.nextAddress() else IPAddress.fromString("127.0.0.1")
-          }
-      IpAddressManager.acquireIp(ip)
-      UcZephyrIpv6Allocator.markAsUsed(ip)
+      if (!isAutoAssigned) {
+        IpAddressManager.acquireIp(ip)
+      }
       return UcTcpIpInterface(ip, name)
     }
   }
@@ -183,23 +219,22 @@ class UcCoapUdpIpInterface(private val ipAddress: IPAddress, name: String? = nul
     fun fromAttribute(
         federate: UcFederate,
         attr: Attribute,
-        useIpv6: Boolean
+        useIpv6: Boolean,
+        messageReporter: MessageReporter
     ): UcCoapUdpIpInterface {
       val address = attr.getParamString("address")
       val name = attr.getParamString("name")
+      val configuredIp =
+          address?.let { parseConfiguredIpAddress(it, federate, attr, messageReporter) }
+      val isAutoAssigned = configuredIp == null && useIpv6
       val ip =
-          if (address != null) {
-            var address = IPAddress.fromString(address)
+          configuredIp
+              ?: if (useIpv6) IpAddressManager.acquireNextIpv6Address()
+              else IPAddress.fromString("127.0.0.1")
 
-            if (federate.isBank) {
-              address = IPAddress.increment(address, federate.bankIdx - 1)
-            }
-            address
-          } else {
-            if (useIpv6) UcZephyrIpv6Allocator.nextAddress() else IPAddress.fromString("127.0.0.1")
-          }
-      IpAddressManager.acquireIp(ip)
-      UcZephyrIpv6Allocator.markAsUsed(ip)
+      if (!isAutoAssigned) {
+        IpAddressManager.acquireIp(ip)
+      }
       return UcCoapUdpIpInterface(ip, name)
     }
   }
@@ -368,6 +403,14 @@ class UcTcpIpChannel(
   }
 
   fun generateChannelCtorForRole(isServer: Boolean): String = ctorString(isServer)
+
+  fun generateClockSyncUdpChannelCtorSrc(): String {
+    return "UdpIpChannel_ctor(&self->clock_sync_channel, \"${srcTcp.ipAddress.address}\", ${srcTcp.port}, \"${destTcp.ipAddress.address}\", ${destTcp.port}, ${protocolFamily});"
+  }
+
+  fun generateClockSyncUdpChannelCtorDest(): String {
+    return "UdpIpChannel_ctor(&self->clock_sync_channel, \"${destTcp.ipAddress.address}\", ${destTcp.port}, \"${srcTcp.ipAddress.address}\", ${srcTcp.port}, ${protocolFamily});"
+  }
 
   override val codeType: String
     get() = "TcpIpChannel"

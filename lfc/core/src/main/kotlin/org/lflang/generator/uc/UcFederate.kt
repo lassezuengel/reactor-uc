@@ -11,6 +11,7 @@ import org.lflang.target.property.type.PlatformType
 class UcFederate(val inst: Instantiation, val bankIdx: Int) {
   val isBank = inst.isBank
   val platform: PlatformType.Platform = AttributeUtils.getFederatePlatform(inst)
+  val board: String? = AttributeUtils.getFederateBoard(inst)
   val interfaces = mutableListOf<UcNetworkInterface>()
   val codeType = if (isBank) "${inst.codeTypeFederate}_${bankIdx}" else inst.codeTypeFederate
   val name = if (isBank) "${inst.name}_${bankIdx}" else inst.name

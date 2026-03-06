@@ -117,6 +117,7 @@
 #endif
 #endif
 
+#define LF_LOG_LEVEL_CLOCK_SYNC LF_LOG_LEVEL_INFO
 /** The log level of the clock synchronization.*/
 #ifndef LF_LOG_LEVEL_CLOCK_SYNC
 #ifdef LF_LOG_LEVEL_ALL

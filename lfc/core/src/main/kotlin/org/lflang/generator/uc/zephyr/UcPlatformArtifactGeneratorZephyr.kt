@@ -1,10 +1,14 @@
-package org.lflang.generator.uc
+package org.lflang.generator.uc.zephyr
 
 import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.collections.buildList
 import kotlin.math.max
 import org.lflang.generator.ZephyrConfig
+import org.lflang.generator.uc.UcConnectionGenerator
+import org.lflang.generator.uc.UcGeneratorFactory
+import org.lflang.generator.uc.UcPlatformArtifactGenerator
+import org.lflang.generator.uc.UcTcpIpInterface
 import org.lflang.lf.Instantiation
 import org.lflang.target.TargetConfig
 import org.lflang.target.property.FedNetInterfaceProperty
@@ -45,8 +49,15 @@ class UcPlatformArtifactGeneratorZephyr(
   override fun generate() {
     val platformOptions = targetConfig.get(PlatformProperty.INSTANCE)
     val boardFromTarget = platformOptions.board().value()
+    // TODO: The "@board" attribute was added as a quick and dirty hack for convenience and should
+    // be removed in favor of a more robust solution for specifying different targets for different
+    // federates.
+    val boardFromFederate =
+        (context as? UcGeneratorFactory.PlatformContext.Federated)?.federate?.board
+    val selectedBoard = boardFromFederate ?: boardFromTarget
     val defaultBoard =
-        boardFromTarget?.takeIf { platformOptions.board().setByUser() } ?: "nrf52840dk_nrf52840"
+        selectedBoard?.takeIf { boardFromFederate != null || platformOptions.board().setByUser() }
+            ?: "nrf52840dk_nrf52840"
     val cmake =
         generateCmake(
             init =
@@ -89,7 +100,7 @@ class UcPlatformArtifactGeneratorZephyr(
           is UcGeneratorFactory.PlatformContext.Federated -> generatePrjConfFederated(context)
         }
 
-    val boardName = platformOptions.board().value()?.lowercase()
+    val boardName = selectedBoard?.lowercase()
     val boardSpecificConfig = boardConfigProvider.configFor(boardName)
     val prjConf =
         listOf(basePrjConf, boardSpecificConfig).filterNotNull().joinToString(separator = "\n\n")
@@ -116,6 +127,7 @@ class UcPlatformArtifactGeneratorZephyr(
         |CONFIG_NET_DRIVERS=y
         |CONFIG_NETWORKING=y
         |CONFIG_NET_TCP=y
+        |CONFIG_NET_UDP=y
         |CONFIG_NET_IPV4=y
         |CONFIG_NET_SOCKETS=y
         |CONFIG_POSIX_API=y
@@ -199,21 +211,21 @@ class UcPlatformArtifactGeneratorZephyr(
         .property("NET_PKT_TX_COUNT", "8")
         .property("NET_BUF_RX_COUNT", "16")
         .property("NET_BUF_TX_COUNT", "16")
-        .property("NET_CONTEXT_NET_PKT_POOL", "y")
+        .property("NET_CONTEXT_NET_PKT_POOL", "n")
         .heading("IP address options")
         .property("NET_IF_UNICAST_IPV6_ADDR_COUNT", "3")
         .property("NET_IF_MCAST_IPV6_ADDR_COUNT", "4")
         .property("NET_MAX_CONTEXTS", "6")
         .property("NET_MAX_CONN", maxConnections)
         .heading("Network shell")
-        .property("NET_SHELL", "y")
-        .property("SHELL", "y")
+        .property("NET_SHELL", "n")
+        .property("SHELL", "n")
         .heading("Network application options and configs")
         .property("NET_CONFIG_SETTINGS", "y")
         .property("NET_CONFIG_NEED_IPV4", "n")
         .property("NET_CONFIG_NEED_IPV6", "y")
         .property("NET_CONFIG_MY_IPV6_ADDR", "\"$devIpv6\"")
-        .property_if(devIpv6 == "fd01::2", "NET_CONFIG_PEER_IPV6_ADDR", "\"fd01::1\"")
+        // .property_if(devIpv6 == "fd01::2", "NET_CONFIG_PEER_IPV6_ADDR", "\"fd01::1\"")
         .property("NET_MAX_CONN", maxConnections)
         .property("ZVFS_OPEN_MAX", "16")
         .property("NET_IF_MAX_IPV6_COUNT", "2")
@@ -222,19 +234,24 @@ class UcPlatformArtifactGeneratorZephyr(
         .property("NET_UDP", "y")
         .property("NET_IPV4", "n")
         .property("NET_L2_IEEE802154_FRAGMENT_REASS_CACHE_SIZE", "8")
+        .property("NET_L2_IEEE802154_RADIO_CSMA_CA", "y")
+        .property("NET_L2_IEEE802154_RADIO_ALOHA", "n")
         .property("NET_CONFIG_MY_IPV4_ADDR", "\"\"")
         .property("NET_CONFIG_PEER_IPV4_ADDR", "\"\"")
         .property("NET_L2_IEEE802154", "y")
-        .property("NET_L2_IEEE802154_SHELL", "y")
+        .property("NET_L2_IEEE802154_SHELL", "n")
         .property("NET_IPV6_ND", "n")
         .property("NET_IPV6_NBR_CACHE", "n")
         .property("NET_CONFIG_IEEE802154_CHANNEL", "26")
         .heading("Additional system configuration")
-        .property("SYSTEM_WORKQUEUE_STACK_SIZE", "4096")
-        .property("MAIN_STACK_SIZE", "8192")
+        .property("SYSTEM_WORKQUEUE_STACK_SIZE", "2048")
+        .property("MAIN_STACK_SIZE", "4096")
+        .property("LF_TCP_IP_CHANNEL_STACK_SIZE", "2048")
+        .property("HEAP_MEM_POOL_SIZE", "1024")
         .property("THREAD_CUSTOM_DATA", "y")
-        .property("ASSERT", "y")
-        .property("ASSERT_LEVEL", "2")
+        .comment("Enable floating point formatting/logging support.")
+        .comment("This increases code size, so feel free to disable if not needed.")
+        .property("CBPRINTF_FP_SUPPORT", "y")
         .generateOutput()
   }
 

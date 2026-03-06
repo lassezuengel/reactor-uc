@@ -164,6 +164,13 @@ void FederatedConnectionBundle_handle_tagged_msg(FederatedConnectionBundle* self
   Scheduler* sched = env->scheduler;
   EventPayloadPool* pool = &input->payload_pool;
 
+  if (msg->payload.size > pool->payload_size) {
+    LF_ERR(FED,
+           "Incoming payload for conn %d is too large (%u bytes > %zu bytes). Dropping to avoid buffer overflow",
+           msg->conn_id, msg->payload.size, pool->payload_size);
+    return;
+  }
+
   tag_t base_tag = ZERO_TAG;
 
   if (input->type == PHYSICAL_CONNECTION) {
@@ -173,21 +180,48 @@ void FederatedConnectionBundle_handle_tagged_msg(FederatedConnectionBundle* self
     base_tag.microstep = msg->tag.microstep;
   }
 
-  tag_t tag = lf_delay_tag(base_tag, input->delay);
-  LF_DEBUG(FED, "Scheduling input %p at tag: " PRINTF_TAG, input, tag);
-
   // Take the value received over the network copy it into the payload_pool of
   // the input port and schedule an event for it.
   void* payload;
+  tag_t tag;
+  tag_t current_tag;
 
   // Note that we now lock the FederatedInputConnection mutex so we can read the last_know_tag from it.
   MUTEX_LOCK(input->mutex);
+  tag = lf_delay_tag(base_tag, input->delay);
+  current_tag = sched->current_tag(sched);
+
+  // Physical links are timestamped from local physical time at receive.
+  // Multiple packets can map to equal tags due to timer granularity, so we
+  // enforce strictly increasing tags per connection via microstep bumps.
+  // Note that because incoming messages are ordered by receive time,
+  // and thus ordering should be preserved by the microstep bumps.
+  if (input->type == PHYSICAL_CONNECTION && lf_tag_compare(tag, input->last_known_tag) <= 0) {
+    tag_t bumped_tag = lf_delay_tag(input->last_known_tag, 0);
+    LF_WARN(FED,
+            "Physical federated input conn=%d required microstep bump. base_tag=" PRINTF_TAG
+            " computed_tag=" PRINTF_TAG " last_known_tag=" PRINTF_TAG " -> bumped_tag=" PRINTF_TAG,
+            msg->conn_id, base_tag, tag, input->last_known_tag, bumped_tag);
+    tag = bumped_tag;
+  }
+
+  LF_DEBUG(FED, "Scheduling input %p at tag: " PRINTF_TAG, input, tag);
+
+  if (lf_tag_compare(tag, current_tag) <= 0) {
+    LF_WARN(FED,
+            "Incoming federated message conn=%d maps to non-future tag. desired_tag=" PRINTF_TAG
+            " current_tag=" PRINTF_TAG " type=%s",
+            msg->conn_id, tag, current_tag, input->type == PHYSICAL_CONNECTION ? "physical" : "logical");
+  }
+
   ret = pool->allocate(pool, &payload);
   if (ret != LF_OK) {
     LF_ERR(FED, "Input buffer at Connection %p is full. Dropping incoming msg", input);
   } else {
     LF_INFO(FED, "Allocated payload for input %p (pool payload_size=%zu)", input, pool->payload_size);
     lf_ret_t status = (*self->deserialize_hooks[msg->conn_id])(payload, msg->payload.bytes, msg->payload.size);
+
+    bool event_scheduled = false;
 
     LF_INFO(FED, "Deserialization returned %d for conn %d", status, msg->conn_id);
 
@@ -205,7 +239,9 @@ void FederatedConnectionBundle_handle_tagged_msg(FederatedConnectionBundle* self
         event.super.tag.microstep++;
         status = sched->schedule_at(sched, &event);
         LF_INFO(FED, "Second schedule_at (current_tag+ms) returned %d for tag: " PRINTF_TAG, status, event.super.tag);
-        if (status != LF_OK) {
+        if (status == LF_OK) {
+          event_scheduled = true;
+        } else {
           LF_ERR(FED, "Failed to schedule event at current tag also. Dropping");
         }
         break;
@@ -213,6 +249,9 @@ void FederatedConnectionBundle_handle_tagged_msg(FederatedConnectionBundle* self
         LF_WARN(FED, "Dropping event with invalid tag");
         break;
       case LF_OK:
+        LF_DEBUG(FED, "Scheduled federated input conn=%d at tag=" PRINTF_TAG " (current_tag=" PRINTF_TAG ")",
+                 msg->conn_id, event.super.tag, current_tag);
+        event_scheduled = true;
         break;
       case LF_VALUE_BUFFER_FULL:
         LF_ERR(FED, "EventQueue is full! desired tag: " PRINTF_TAG " current tag: " PRINTF_TAG, tag,
@@ -227,12 +266,19 @@ void FederatedConnectionBundle_handle_tagged_msg(FederatedConnectionBundle* self
       LF_ERR(FED, "Cannot deserialize message from other Federate. Dropping");
     }
 
+    if (!event_scheduled) {
+      lf_ret_t free_ret = pool->free(pool, payload);
+      if (free_ret != LF_OK) {
+        LF_ERR(FED, "Failed to free dropped payload for input %p", input);
+      }
+    }
+
     if (lf_tag_compare(input->last_known_tag, tag) < 0) {
       LF_DEBUG(FED, "Updating last known tag for input %p to " PRINTF_TAG, input, tag);
       input->last_known_tag = tag;
     }
-    MUTEX_UNLOCK(input->mutex);
   }
+  MUTEX_UNLOCK(input->mutex);
 }
 
 void FederatedConnectionBundle_msg_received_cb(FederatedConnectionBundle* self, const FederateMessage* msg) {
@@ -263,15 +309,17 @@ void FederatedConnectionBundle_msg_received_cb(FederatedConnectionBundle* self, 
 }
 
 void FederatedConnectionBundle_ctor(FederatedConnectionBundle* self, Reactor* parent, NetworkChannel* net_channel,
-                                    FederatedInputConnection** inputs, deserialize_hook* deserialize_hooks,
-                                    size_t inputs_size, FederatedOutputConnection** outputs,
-                                    serialize_hook* serialize_hooks, size_t outputs_size, size_t index) {
+                                    NetworkChannel* clock_sync_channel, FederatedInputConnection** inputs,
+                                    deserialize_hook* deserialize_hooks, size_t inputs_size,
+                                    FederatedOutputConnection** outputs, serialize_hook* serialize_hooks,
+                                    size_t outputs_size, size_t index) {
   validate(self);
   validate(parent);
   validate(net_channel);
   self->inputs = inputs;
   self->inputs_size = inputs_size;
   self->net_channel = net_channel;
+  self->clock_sync_channel = clock_sync_channel;
   self->outputs = outputs;
   self->outputs_size = outputs_size;
   self->parent = parent;
@@ -279,11 +327,18 @@ void FederatedConnectionBundle_ctor(FederatedConnectionBundle* self, Reactor* pa
   self->serialize_hooks = serialize_hooks;
   self->index = index;
   self->net_channel->register_receive_callback(self->net_channel, FederatedConnectionBundle_msg_received_cb, self);
+  if (self->clock_sync_channel != NULL) {
+    self->clock_sync_channel->register_receive_callback(self->clock_sync_channel,
+                                                        FederatedConnectionBundle_msg_received_cb, self);
+  }
 }
 
 void FederatedConnectionBundle_validate(FederatedConnectionBundle* bundle) {
   validate(bundle);
   validate(bundle->net_channel);
+  if (bundle->clock_sync_channel != NULL) {
+    validate(bundle->clock_sync_channel);
+  }
   for (size_t i = 0; i < bundle->inputs_size; i++) {
     validate(bundle->inputs[i]);
     validate(bundle->deserialize_hooks[i]);

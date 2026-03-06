@@ -30,6 +30,7 @@ typedef enum {
 
 typedef enum {
   NETWORK_CHANNEL_TYPE_TCP_IP,
+  NETWORK_CHANNEL_TYPE_UDP_IP,
   NETWORK_CHANNEL_TYPE_COAP_UDP_IP,
   NETWORK_CHANNEL_TYPE_UART,
   NETWORK_CHANNEL_TYPE_S4NOC
@@ -129,20 +130,6 @@ struct AsyncNetworkChannel {
   NetworkChannel super;
 };
 
-#ifdef PLATFORM_ZEPHYR
-/**
- * @brief Initialize the connection manager. This is to be done before starting any federation.
- * @ingroup Federated
- */
-void lf_init_connection_manager(void);
-
-/**
- * @brief Wait for network connection to be established.
- * @ingroup Federated
- */
-void lf_wait_for_network_connection(void);
-#endif // PLATFORM_ZEPHYR
-
 #ifdef NETWORK_CHANNEL_UART
 #include "network_channel/uart_channel.h"
 #endif
@@ -156,6 +143,7 @@ void lf_wait_for_network_connection(void);
 #ifdef NETWORK_CHANNEL_TCP_POSIX
 #include "platform/posix/tcp_ip_channel.h"
 #endif
+#include "platform/zephyr/udp_ip_channel.h"
 
 #elif defined(PLATFORM_RIOT)
 #ifdef NETWORK_CHANNEL_TCP_POSIX

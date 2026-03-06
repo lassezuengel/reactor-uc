@@ -286,6 +286,11 @@ public class AttributeUtils {
     }
   }
 
+  /** Return the per-federate Zephyr board if one is specified using {@code @board("...")}. */
+  public static String getFederateBoard(Instantiation node) {
+    return getAttributeValue(node, "board");
+  }
+
   public static boolean isGrandmaster(Instantiation node) {
     return findAttributeByName(node, "grandmaster") != null;
   }
