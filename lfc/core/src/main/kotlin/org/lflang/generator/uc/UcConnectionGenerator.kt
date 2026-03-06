@@ -31,7 +31,8 @@ class UcConnectionGenerator(
     private val allFederates:
         List<UcFederate>, // A list of all the federates in the program. Only used for federated
     // code-gen.
-    private val targetConfig: TargetConfig? = null
+    private val targetConfig: TargetConfig? = null,
+    private val messageReporter: MessageReporter
 ) {
 
   /** A list containing all non-federated gruoped connections within this reactor. */
@@ -255,9 +256,8 @@ class UcConnectionGenerator(
         IpAddressManager.resetIpv6Allocator()
       }
       for (fed in allFederates) {
-        UcNetworkInterfaceFactory.createInterfaces(fed, useIpv6Networking).forEach {
-          fed.addInterface(it)
-        }
+        UcNetworkInterfaceFactory.createInterfaces(fed, useIpv6Networking, messageReporter)
+            .forEach { fed.addInterface(it) }
       }
       federateInterfacesInitialized = true
     }
