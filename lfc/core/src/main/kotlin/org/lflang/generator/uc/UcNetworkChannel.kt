@@ -2,7 +2,6 @@ package org.lflang.generator.uc
 
 import org.lflang.AttributeUtils.getInterfaceAttributes
 import org.lflang.AttributeUtils.getLinkAttribute
-import org.lflang.MessageReporter
 import org.lflang.generator.uc.NetworkChannelType.*
 import org.lflang.lf.Attribute
 
@@ -16,60 +15,26 @@ enum class NetworkChannelType {
   NONE
 }
 
-private fun parseConfiguredIpAddress(
-    address: String,
-    federate: UcFederate,
-    attr: Attribute,
-    messageReporter: MessageReporter
-): IPAddress? {
-  val parsedAddress =
-      try {
-        IPAddress.fromString(address)
-      } catch (e: IllegalArgumentException) {
-        messageReporter.at(attr).error(e.message)
-        return null
-      }
-
-  if (!federate.isBank) {
-    return parsedAddress
-  }
-
-  return try {
-    IPAddress.increment(parsedAddress, federate.bankIdx - 1)
-  } catch (e: IllegalArgumentException) {
-    messageReporter
-        .at(attr)
-        .error(
-            "Unable to increment IP address '$address' for bank index ${federate.bankIdx}: ${e.message}")
-    null
-  }
-}
-
 object UcNetworkInterfaceFactory {
-  fun createInterfaces(
-      federate: UcFederate,
-      useIpv6: Boolean,
-      messageReporter: MessageReporter
-  ): List<UcNetworkInterface> {
+  fun createInterfaces(federate: UcFederate, useIpv6: Boolean): List<UcNetworkInterface> {
     val attrs: List<Attribute> = getInterfaceAttributes(federate.inst)
     return if (attrs.isEmpty()) {
       listOf(createDefaultInterface(useIpv6))
     } else {
-      attrs.map { createInterfaceFromAttribute(federate, it, useIpv6, messageReporter) }
+      attrs.map { createInterfaceFromAttribute(federate, it, useIpv6) }
     }
   }
 
   private fun createInterfaceFromAttribute(
       federate: UcFederate,
       attr: Attribute,
-      useIpv6: Boolean,
-      messageReporter: MessageReporter
+      useIpv6: Boolean
   ): UcNetworkInterface {
     val protocol = attr.attrName.substringAfter("_")
     return when (protocol) {
-      "tcp" -> UcTcpIpInterface.fromAttribute(federate, attr, useIpv6, messageReporter)
+      "tcp" -> UcTcpIpInterface.fromAttribute(federate, attr, useIpv6)
       "uart" -> UcUARTInterface.fromAttribute(federate, attr)
-      "coap" -> UcCoapUdpIpInterface.fromAttribute(federate, attr, useIpv6, messageReporter)
+      "coap" -> UcCoapUdpIpInterface.fromAttribute(federate, attr, useIpv6)
       "s4noc" -> UcS4NocInterface.fromAttribute(federate, attr)
       "custom" -> UcCustomInterface.fromAttribute(federate, attr)
       else -> throw IllegalArgumentException("Unrecognized interface attribute $attr")
@@ -146,23 +111,22 @@ class UcTcpIpInterface(private val ipAddress: IPAddress, name: String? = null) :
   }
 
   companion object {
-    fun fromAttribute(
-        federate: UcFederate,
-        attr: Attribute,
-        useIpv6: Boolean,
-        messageReporter: MessageReporter
-    ): UcTcpIpInterface {
+    fun fromAttribute(federate: UcFederate, attr: Attribute, useIpv6: Boolean): UcTcpIpInterface {
       val address = attr.getParamString("address")
       val name = attr.getParamString("name")
-      val configuredIp =
-          address?.let { parseConfiguredIpAddress(it, federate, attr, messageReporter) }
-      val isAutoAssigned = configuredIp == null && useIpv6
       val ip =
-          configuredIp
-              ?: if (useIpv6) IpAddressManager.acquireNextIpv6Address()
-              else IPAddress.fromString("127.0.0.1")
+          if (address != null) {
+            var address = IPAddress.fromString(address)
 
-      if (!isAutoAssigned) {
+            if (federate.isBank) {
+              address = IPAddress.increment(address, federate.bankIdx - 1)
+            }
+            address
+          } else {
+            if (useIpv6) IpAddressManager.acquireNextIpv6Address()
+            else IPAddress.fromString("127.0.0.1")
+          }
+      if (!(useIpv6 && address == null)) {
         IpAddressManager.acquireIp(ip)
       }
       return UcTcpIpInterface(ip, name)
@@ -219,20 +183,23 @@ class UcCoapUdpIpInterface(private val ipAddress: IPAddress, name: String? = nul
     fun fromAttribute(
         federate: UcFederate,
         attr: Attribute,
-        useIpv6: Boolean,
-        messageReporter: MessageReporter
+        useIpv6: Boolean
     ): UcCoapUdpIpInterface {
       val address = attr.getParamString("address")
       val name = attr.getParamString("name")
-      val configuredIp =
-          address?.let { parseConfiguredIpAddress(it, federate, attr, messageReporter) }
-      val isAutoAssigned = configuredIp == null && useIpv6
       val ip =
-          configuredIp
-              ?: if (useIpv6) IpAddressManager.acquireNextIpv6Address()
-              else IPAddress.fromString("127.0.0.1")
+          if (address != null) {
+            var address = IPAddress.fromString(address)
 
-      if (!isAutoAssigned) {
+            if (federate.isBank) {
+              address = IPAddress.increment(address, federate.bankIdx - 1)
+            }
+            address
+          } else {
+            if (useIpv6) IpAddressManager.acquireNextIpv6Address()
+            else IPAddress.fromString("127.0.0.1")
+          }
+      if (!(useIpv6 && address == null)) {
         IpAddressManager.acquireIp(ip)
       }
       return UcCoapUdpIpInterface(ip, name)

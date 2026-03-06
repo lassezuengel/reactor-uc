@@ -30,7 +30,6 @@ class UcPlatformGeneratorFederated(
         UcMainGeneratorFederated(
             federate,
             generator.federates,
-            messageReporter,
             generator.targetConfig,
             numEventsAndReactions.first,
             numEventsAndReactions.second,

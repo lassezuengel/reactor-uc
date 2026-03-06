@@ -16,8 +16,7 @@ class UcFederateGenerator(
   private val container = currentFederate.inst.eContainer() as Reactor
   private val reactor = currentFederate.inst.reactor
   private val connections =
-      UcConnectionGenerator(
-          container, currentFederate, otherFederates, targetConfig, messageReporter)
+      UcConnectionGenerator(container, currentFederate, otherFederates, targetConfig)
   private val parameters = UcParameterGenerator(container, currentFederate)
   private val ports = UcPortGenerator(container, connections)
   private val reactions = UcReactionGenerator(container)

@@ -1,7 +1,6 @@
 package org.lflang.generator.uc
 
 import kotlin.random.Random
-import org.lflang.MessageReporter
 import org.lflang.generator.PrependOperator
 import org.lflang.generator.uc.UcReactorGenerator.Companion.codeType
 import org.lflang.generator.uc.UcReactorGenerator.Companion.hasPhysicalActions
@@ -170,7 +169,6 @@ open class UcMainGeneratorNonFederated(
 class UcMainGeneratorFederated(
     private val currentFederate: UcFederate,
     private val otherFederates: List<UcFederate>,
-    private val messageReporter: MessageReporter,
     targetConfig: TargetConfig,
     numEvents: Int,
     numReactions: Int,
@@ -180,7 +178,7 @@ class UcMainGeneratorFederated(
   private val top = currentFederate.inst.eContainer() as Reactor
   private val main = currentFederate.inst.reactor
   private val ucConnectionGenerator =
-      UcConnectionGenerator(top, currentFederate, otherFederates, targetConfig, messageReporter)
+      UcConnectionGenerator(top, currentFederate, otherFederates, targetConfig)
   private val netBundlesSize = ucConnectionGenerator.getNumFederatedConnectionBundles()
   private val clockSyncGenerator =
       UcClockSyncGenerator(currentFederate, ucConnectionGenerator, targetConfig)
