@@ -243,6 +243,7 @@ class UcPlatformArtifactGeneratorZephyr(
         .property("NET_IPV6_ND", "n")
         .property("NET_IPV6_NBR_CACHE", "n")
         .property("NET_CONFIG_IEEE802154_CHANNEL", "26")
+        .property("NET_TCP_INIT_RETRANSMISSION_TIMEOUT", "100")
         .heading("Additional system configuration")
         .property("SYSTEM_WORKQUEUE_STACK_SIZE", "2048")
         .property("MAIN_STACK_SIZE", "4096")
