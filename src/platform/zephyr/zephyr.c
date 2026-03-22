@@ -23,6 +23,9 @@ void k_sys_fatal_error_handler(unsigned int reason, const struct arch_esf* esf) 
 
 instant_t PlatformZephyr_get_physical_time(Platform* super) {
   (void)super;
+  // TODO: k_uptime_get() returns milliseconds, but we probably want to use a higher resolution timer
+  // as this can cause a whole lot of issues with the timing of the system (see also commit 2ea859a).
+  // We should consider using k_uptime_ticks() instead.
   return k_uptime_get() * MSEC(1);
 }
 
