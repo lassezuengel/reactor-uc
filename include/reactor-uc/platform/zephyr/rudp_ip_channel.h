@@ -9,7 +9,7 @@
 #include "reactor-uc/error.h"
 #include "reactor-uc/network_channel.h"
 
-#define RUDP_IP_CHANNEL_BUFFER_SIZE 1024
+#define RUDP_IP_CHANNEL_BUFFER_SIZE 64
 #define RUDP_OUTGOING_BUFFER_SIZE 16
 #define RUDP_INCOMING_BUFFER_SIZE 32
 #define RUDP_RETRANSMIT_TIMEOUT_MS 50
