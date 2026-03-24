@@ -11,6 +11,15 @@
 #include <sys/time.h>
 #include <unistd.h>
 
+// Whether to allow reconnections after connection loss. Specifically, this controls whether
+// the channel will answer to unexpected handshake messages when the channel is already connected.
+//
+// TODO! Implement and set to 1.
+//
+// Because, currently, we do fully support reconnection mechanisms, we disable answering to unexpected
+// handshake messages.
+#define ALLOW_RECONNECTION 0
+
 #define RUDP_IP_CHANNEL_ERR(fmt, ...) LF_ERR(NET, "RUdpIpChannel: " fmt, ##__VA_ARGS__)
 #define RUDP_IP_CHANNEL_WARN(fmt, ...) LF_WARN(NET, "RUdpIpChannel: " fmt, ##__VA_ARGS__)
 #define RUDP_IP_CHANNEL_INFO(fmt, ...) LF_INFO(NET, "RUdpIpChannel: " fmt, ##__VA_ARGS__)
@@ -337,6 +346,11 @@ static void _RUdpIpChannel_dispatch_received_packet(RUdpIpChannel* self, int pac
 
   switch (packet_type) {
   case RUDP_PACKET_TYPE_HELLO:
+    if (!ALLOW_RECONNECTION && _RUdpIpChannel_get_state(self) == NETWORK_CHANNEL_STATE_CONNECTED) {
+      RUDP_IP_CHANNEL_WARN("Received HELLO while already connected, ignoring due to ALLOW_RECONNECTION=0");
+      return;
+    }
+
     RUDP_IP_CHANNEL_DEBUG("Received HELLO");
     if (_RUdpIpChannel_send_control_packet(self, RUDP_PACKET_TYPE_HELLO_ACK, 0, 0) != NETWORK_CHANNEL_RET_OK) {
       _RUdpIpChannel_update_state(self, NETWORK_CHANNEL_STATE_LOST_CONNECTION);
@@ -344,6 +358,11 @@ static void _RUdpIpChannel_dispatch_received_packet(RUdpIpChannel* self, int pac
     return;
 
   case RUDP_PACKET_TYPE_HELLO_ACK:
+    if (!ALLOW_RECONNECTION && _RUdpIpChannel_get_state(self) == NETWORK_CHANNEL_STATE_CONNECTED) {
+      RUDP_IP_CHANNEL_WARN("Received HELLO_ACK while already connected, ignoring due to ALLOW_RECONNECTION=0");
+      return;
+    }
+
     RUDP_IP_CHANNEL_DEBUG("Received HELLO_ACK");
     if (self->is_client_role) {
       self->handshake_hello_acked = true;
@@ -354,6 +373,11 @@ static void _RUdpIpChannel_dispatch_received_packet(RUdpIpChannel* self, int pac
     return;
 
   case RUDP_PACKET_TYPE_READY:
+    if (!ALLOW_RECONNECTION && _RUdpIpChannel_get_state(self) == NETWORK_CHANNEL_STATE_CONNECTED) {
+      RUDP_IP_CHANNEL_WARN("Received READY while already connected, ignoring due to ALLOW_RECONNECTION=0");
+      return;
+    }
+
     RUDP_IP_CHANNEL_DEBUG("Received READY");
     if (self->is_client_role) {
       RUDP_IP_CHANNEL_DEBUG("Ignoring READY in client role");
@@ -372,6 +396,11 @@ static void _RUdpIpChannel_dispatch_received_packet(RUdpIpChannel* self, int pac
     return;
 
   case RUDP_PACKET_TYPE_READY_ACK:
+    if (!ALLOW_RECONNECTION && _RUdpIpChannel_get_state(self) == NETWORK_CHANNEL_STATE_CONNECTED) {
+      RUDP_IP_CHANNEL_WARN("Received READY while already connected, ignoring due to ALLOW_RECONNECTION=0");
+      return;
+    }
+
     RUDP_IP_CHANNEL_DEBUG("Received READY_ACK");
     if (self->is_client_role) {
       self->handshake_ready_acked = true;
@@ -1040,10 +1069,14 @@ static void _RUdpIpChannel_worker_thread(void* p1, void* p2, void* p3) {
 
     case NETWORK_CHANNEL_STATE_CONNECTION_FAILED:
     case NETWORK_CHANNEL_STATE_LOST_CONNECTION:
+#if !ALLOW_RECONNECTION
+      RUDP_IP_CHANNEL_ERR("RUDP channel lost connection, reconnection not allowed! Restart your stuff.");
+#else
       RUDP_IP_CHANNEL_WARN("RUDP channel lost connection, retrying");
       _RUdpIpChannel_close_socket(self);
       _RUdpIpChannel_reset_handshake_state(self);
       _RUdpIpChannel_update_state(self, NETWORK_CHANNEL_STATE_OPEN);
+#endif
       k_msleep(100);
       break;
 
