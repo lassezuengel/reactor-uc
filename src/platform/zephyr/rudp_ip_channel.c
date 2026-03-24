@@ -22,10 +22,10 @@
 
 static volatile uint32_t packets_sent = 0, packets_retransmitted = 0;
 static volatile uint32_t packets_received = 0, packets_received_duplicates = 0;
-#ifdef RUDP_IP_CHANNEL_LOG_STATS
-#define LOG_STAT(fmt, ...) RUDP_IP_CHANNEL_INFO("[stat] " fmt, ##__VA_ARGS__)
+#ifdef RUDP_IP_CHANNEL_RUDP_IP_CHANNEL_STATS
+#define RUDP_IP_CHANNEL_STAT(fmt, ...) RUDP_IP_CHANNEL_INFO("[stat] " fmt, ##__VA_ARGS__)
 #else
-#define LOG_STAT(fmt, ...)                                                                                             \
+#define RUDP_IP_CHANNEL_STAT(fmt, ...)                                                                                 \
   do {                                                                                                                 \
   } while (0)
 #endif
@@ -50,10 +50,42 @@ enum {
   // all older packets were received (even if their ACKs haven't arrived yet). This allows the sender
   // to mark all older packets as acknowledged when processing the HACK, preventing unnecessary
   // retransmissions of those packets in case of ACK loss.
-  RUDP_PACKET_TYPE_HACK = 0x03
+  RUDP_PACKET_TYPE_HACK = 0x03,
+  // Client -> server handshake packet indicating readiness.
+  RUDP_PACKET_TYPE_HELLO = 0x04,
+  // Server -> client handshake response confirming channel readiness.
+  RUDP_PACKET_TYPE_HELLO_ACK = 0x05,
+  // Client -> server final handshake confirmation.
+  RUDP_PACKET_TYPE_READY = 0x06,
+  // Server -> client ACK for READY.
+  RUDP_PACKET_TYPE_READY_ACK = 0x07
 } PacketType;
 
 static void _RUdpIpChannel_worker_thread(void* p1, void* p2, void* p3);
+static void _RUdpIpChannel_reset_handshake_state(RUdpIpChannel* self);
+static int _RUdpIpChannel_protocol_extract_uid(const char* data, size_t length);
+static void _RUdpIpChannel_handle_received_ack(RUdpIpChannel* self, int uid);
+static void _RUdpIpChannel_handle_received_fack(RUdpIpChannel* self, int uid);
+static void _RUdpIpChannel_handle_received_hack(RUdpIpChannel* self, int uid, int uid_to_retransmit);
+static void _RUdpIpChannel_handle_received_data(RUdpIpChannel* self, int uid, const char* payload, int payload_length);
+
+/**
+ * Reads a 32-bit integer from an unaligned memory location.
+ * @param p Pointer to the memory location.
+ * @return The integer value.
+ */
+static int _RUdpIpChannel_read_i32_unaligned(const char* p) {
+  int v;
+  memcpy(&v, p, sizeof(v));
+  return v;
+}
+
+/**
+ * Writes a 32-bit integer to an unaligned memory location.
+ * @param p Pointer to the memory location.
+ * @param v The integer value to write.
+ */
+static void _RUdpIpChannel_write_i32_unaligned(char* p, int v) { memcpy(p, &v, sizeof(v)); }
 
 static int _RUdpIpChannel_fill_sockaddr(const char* host, unsigned short port, int protocol_family,
                                         struct sockaddr_storage* storage, socklen_t* addrlen) {
@@ -172,7 +204,7 @@ static int _RUdpIpChannel_connect(RUdpIpChannel* self) {
     RUDP_IP_CHANNEL_WARN("Failed to set socket recv timeout errno=%d", errno);
   }
 #else
-  RUDP_IP_CHANNEL_DEBUG("SO_RCVTIMEO unsupported or disabled, recv will block until data arrives");
+  RUDP_IP_CHANNEL_WARN("SO_RCVTIMEO unsupported or disabled, recv will block until data arrives");
 #endif
 
   if (bind(self->fd, (struct sockaddr*)&local_addr, local_addrlen) < 0) {
@@ -196,6 +228,7 @@ static lf_ret_t RUdpIpChannel_open_connection(NetworkChannel* untyped_self) {
   RUdpIpChannel* self = (RUdpIpChannel*)untyped_self;
   RUDP_IP_CHANNEL_DEBUG("Open connection");
 
+  _RUdpIpChannel_reset_handshake_state(self);
   _RUdpIpChannel_update_state(self, NETWORK_CHANNEL_STATE_OPEN);
 
   return NETWORK_CHANNEL_RET_OK;
@@ -215,16 +248,176 @@ static void RUdpIpChannel_close_connection(NetworkChannel* untyped_self) {
 
 /********************************************************************************************************** */
 
-static bool _RUdpIpChannel_is_ack_packet(const unsigned char* data, size_t length) {
-  return length == 9 && (data[0] & 0x0F) == RUDP_PACKET_TYPE_ACK;
+/**
+ * Determine the type of a received packet based on its data.
+ * @param data The packet data.
+ * @param length The length of the packet data.
+ * @return The type of the packet, or -1 if the packet is too short.
+ */
+static int _RUdpIpChannel_packet_type(const char* data, size_t length) {
+  if (length < 1) {
+    return -1;
+  }
+  return data[0] & 0x0F;
 }
 
-static bool _RUdpIpChannel_is_fack_packet(const unsigned char* data, size_t length) {
-  return length == 9 && (data[0] & 0x0F) == RUDP_PACKET_TYPE_FACK;
+/**
+ * Send a control packet (HELLO, HELLO_ACK, READY, READY_ACK) to the remote peer.
+ * @param self The RUDP IP channel instance.
+ * @param packet_type The type of the control packet to send.
+ * @param uid The unique identifier of the packet this control packet refers to, or 0 if not applicable (e.g. for
+ * handshake packets).
+ * @param extra Additional data for the packet. The current protocol expects extra=0 for all control packets.
+ * @return NETWORK_CHANNEL_RET_OK on success, otherwise an error code.
+ */
+static int _RUdpIpChannel_send_control_packet(RUdpIpChannel* self, int packet_type, int uid, int extra) {
+  char packet[9] = {0};
+  packet[0] = packet_type & 0x0F;
+  _RUdpIpChannel_write_i32_unaligned(packet + 1, uid);
+  _RUdpIpChannel_write_i32_unaligned(packet + 5, extra);
+
+  ssize_t sent = send(self->fd, packet, sizeof(packet), 0);
+  if (sent < 0) {
+    RUDP_IP_CHANNEL_ERR("Failed to send control packet type=%d errno=%d", packet_type, errno);
+    return NETWORK_CHANNEL_RET_ERROR;
+  }
+
+  return NETWORK_CHANNEL_RET_OK;
 }
 
-static bool _RUdpIpChannel_is_hack_packet(const unsigned char* data, size_t length) {
-  return length == 9 && (data[0] & 0x0F) == RUDP_PACKET_TYPE_HACK;
+static void _RUdpIpChannel_reset_handshake_state(RUdpIpChannel* self) {
+  self->handshake_hello_sent = false;
+  self->handshake_hello_acked = false;
+  self->handshake_ready_sent = false;
+  self->handshake_ready_acked = false;
+  self->handshake_last_hello_send_time_ms = 0;
+  self->handshake_last_ready_send_time_ms = 0;
+  self->handshake_hello_retry_count = 0;
+  self->handshake_ready_retry_count = 0;
+}
+
+static int _RUdpIpChannel_send_client_hello(RUdpIpChannel* self) {
+  int ret = _RUdpIpChannel_send_control_packet(self, RUDP_PACKET_TYPE_HELLO, 0, 0);
+  if (ret != NETWORK_CHANNEL_RET_OK) {
+    return ret;
+  }
+
+  self->handshake_hello_sent = true;
+  self->handshake_last_hello_send_time_ms = k_uptime_get();
+  self->handshake_hello_retry_count++;
+  RUDP_IP_CHANNEL_DEBUG("Sent HELLO (%d)", self->handshake_hello_retry_count);
+  return NETWORK_CHANNEL_RET_OK;
+}
+
+static int _RUdpIpChannel_send_client_ready(RUdpIpChannel* self) {
+  int ret = _RUdpIpChannel_send_control_packet(self, RUDP_PACKET_TYPE_READY, 0, 0);
+  if (ret != NETWORK_CHANNEL_RET_OK) {
+    return ret;
+  }
+
+  self->handshake_ready_sent = true;
+  self->handshake_last_ready_send_time_ms = k_uptime_get();
+  self->handshake_ready_retry_count++;
+  RUDP_IP_CHANNEL_DEBUG("Sent READY (%d)", self->handshake_ready_retry_count);
+  return NETWORK_CHANNEL_RET_OK;
+}
+
+/**
+ * Dispatch a received packet based on its type. This is called from the worker thread when a packet is received.
+ * This function handles all kinds of expected packets (handshake, ACKs, data) and is responsible for responding
+ *to handshake packets and ACKs as well as passing received data packets to the receive callback.
+ */
+static void _RUdpIpChannel_dispatch_received_packet(RUdpIpChannel* self, int packet_type, size_t bytes_received) {
+  if (bytes_received < 5) {
+    RUDP_IP_CHANNEL_WARN("Received packet too short (%d bytes), discarding", (int)bytes_received);
+    return;
+  }
+
+  int uid = _RUdpIpChannel_protocol_extract_uid(self->read_buffer, bytes_received);
+
+  switch (packet_type) {
+  case RUDP_PACKET_TYPE_HELLO:
+    RUDP_IP_CHANNEL_DEBUG("Received HELLO");
+    if (_RUdpIpChannel_send_control_packet(self, RUDP_PACKET_TYPE_HELLO_ACK, 0, 0) != NETWORK_CHANNEL_RET_OK) {
+      _RUdpIpChannel_update_state(self, NETWORK_CHANNEL_STATE_LOST_CONNECTION);
+    }
+    return;
+
+  case RUDP_PACKET_TYPE_HELLO_ACK:
+    RUDP_IP_CHANNEL_DEBUG("Received HELLO_ACK");
+    if (self->is_client_role) {
+      self->handshake_hello_acked = true;
+      if (_RUdpIpChannel_send_client_ready(self) != NETWORK_CHANNEL_RET_OK) {
+        _RUdpIpChannel_update_state(self, NETWORK_CHANNEL_STATE_LOST_CONNECTION);
+      }
+    }
+    return;
+
+  case RUDP_PACKET_TYPE_READY:
+    RUDP_IP_CHANNEL_DEBUG("Received READY");
+    if (self->is_client_role) {
+      RUDP_IP_CHANNEL_DEBUG("Ignoring READY in client role");
+      return;
+    }
+
+    if (_RUdpIpChannel_send_control_packet(self, RUDP_PACKET_TYPE_READY_ACK, 0, 0) != NETWORK_CHANNEL_RET_OK) {
+      _RUdpIpChannel_update_state(self, NETWORK_CHANNEL_STATE_LOST_CONNECTION);
+      return;
+    }
+
+    if (_RUdpIpChannel_get_state(self) == NETWORK_CHANNEL_STATE_CONNECTION_IN_PROGRESS) {
+      RUDP_IP_CHANNEL_INFO("RUDP handshake complete (server role)");
+      _RUdpIpChannel_update_state(self, NETWORK_CHANNEL_STATE_CONNECTED);
+    }
+    return;
+
+  case RUDP_PACKET_TYPE_READY_ACK:
+    RUDP_IP_CHANNEL_DEBUG("Received READY_ACK");
+    if (self->is_client_role) {
+      self->handshake_ready_acked = true;
+      // TODO: Right now, when we think we're connected and receive unexpected handshake messages, we answer them as if
+      // we're still in the handshake. This is to allow the handshake to complete even if some messages are lost.
+      // What's missing is that, once the handshake is done, we should adjust our uid counters and pending packet uids
+      // because the connection reset. Right now, on connection loss, the sender will keep trying to send pending
+      // packets with their old UIDs, and the receiver will drop them because it thinks those UIDs are too far in the
+      // future.
+      // Because of this, while we do have a reconnection mechanism, it serves no practical purpose.
+      if (_RUdpIpChannel_get_state(self) == NETWORK_CHANNEL_STATE_CONNECTION_IN_PROGRESS) {
+        RUDP_IP_CHANNEL_INFO("RUDP handshake complete (client role)");
+        _RUdpIpChannel_update_state(self, NETWORK_CHANNEL_STATE_CONNECTED);
+      }
+    }
+    return;
+
+  case RUDP_PACKET_TYPE_ACK:
+    _RUdpIpChannel_handle_received_ack(self, uid);
+    return;
+
+  case RUDP_PACKET_TYPE_FACK:
+    _RUdpIpChannel_handle_received_fack(self, uid);
+    return;
+
+  case RUDP_PACKET_TYPE_HACK: {
+    int uid_to_retransmit = _RUdpIpChannel_read_i32_unaligned(self->read_buffer + 5);
+    _RUdpIpChannel_handle_received_hack(self, uid, uid_to_retransmit);
+    return;
+  }
+
+  case RUDP_PACKET_TYPE_DATA: {
+    int payload_length = (int)bytes_received - 9;
+    if (payload_length < 0) {
+      RUDP_IP_CHANNEL_WARN("Invalid data packet length %d", (int)bytes_received);
+      return;
+    }
+
+    _RUdpIpChannel_handle_received_data(self, uid, self->read_buffer + 9, payload_length);
+    return;
+  }
+
+  default:
+    RUDP_IP_CHANNEL_DEBUG("Unknown control packet type=%d ignored", packet_type);
+    return;
+  }
 }
 
 /**
@@ -235,13 +428,13 @@ static bool _RUdpIpChannel_is_hack_packet(const unsigned char* data, size_t leng
  * [payload]
  *
  */
-static int _RUdpIpChannel_protocol_extract_uid(const unsigned char* data, size_t length) {
+static int _RUdpIpChannel_protocol_extract_uid(const char* data, size_t length) {
   if (length < 5) {
     RUDP_IP_CHANNEL_ERR("Received RUDP packet with invalid length %zu", length);
     return -1;
   }
 
-  return *(const int*)(data + 1);
+  return _RUdpIpChannel_read_i32_unaligned(data + 1);
 }
 
 /**
@@ -278,7 +471,7 @@ static int _RUdpIpChannel_send_outgoing_packet(RUdpIpChannel* self, int buffer_i
   ssize_t bytes_sent = send(self->fd, pkt->packet_data, (size_t)pkt->packet_length, 0);
 
   if (packets_sent++ % 100 == 0) {
-    LOG_STAT("%d packets sent, %d retransmissions", packets_sent, packets_retransmitted);
+    RUDP_IP_CHANNEL_STAT("%d packets sent, %d retransmissions", packets_sent, packets_retransmitted);
   }
 
   if (bytes_sent < 0) {
@@ -316,8 +509,8 @@ static int _RUdpIpChannel_retransmit_outgoing_packet(RUdpIpChannel* self, int bu
   if (!triggered_by_timeout && hack_request_uid < pkt->next_allowed_hack_uid) {
     RUDP_IP_CHANNEL_DEBUG("Ignoring stale/old HACK retransmit request for uid=%d (requester uid=%d, next_allowed=%d)",
                           pkt->uid, hack_request_uid, pkt->next_allowed_hack_uid);
-    LOG_STAT("Ignoring stale/old HACK retransmit request for uid=%d (requester uid=%d, next_allowed=%d)", pkt->uid,
-             hack_request_uid, pkt->next_allowed_hack_uid);
+    RUDP_IP_CHANNEL_STAT("Ignoring stale/old HACK retransmit request for uid=%d (requester uid=%d, next_allowed=%d)",
+                         pkt->uid, hack_request_uid, pkt->next_allowed_hack_uid);
     k_mutex_unlock(&self->mutex);
     return NETWORK_CHANNEL_RET_OK;
   }
@@ -349,13 +542,13 @@ static int _RUdpIpChannel_retransmit_outgoing_packet(RUdpIpChannel* self, int bu
   if (triggered_by_timeout) {
     RUDP_IP_CHANNEL_DEBUG("Retransmitting packet uid=%d after %d ms due to timeout (retry %d/%d)", uid, (int)elapsed_ms,
                           retry_attempt, RUDP_MAX_RETRIES);
-    LOG_STAT("Retransmitting packet uid=%d after %d ms due to timeout (retry %d/%d)", uid, (int)elapsed_ms,
-             retry_attempt, RUDP_MAX_RETRIES);
+    RUDP_IP_CHANNEL_STAT("Retransmitting packet uid=%d after %d ms due to timeout (retry %d/%d)", uid, (int)elapsed_ms,
+                         retry_attempt, RUDP_MAX_RETRIES);
   } else {
     RUDP_IP_CHANNEL_DEBUG("Retransmitting packet uid=%d after %d ms due to HACK request (retry %d/%d)", uid,
                           (int)elapsed_ms, retry_attempt, RUDP_MAX_RETRIES);
-    LOG_STAT("Retransmitting packet uid=%d after %d ms due to HACK request (retry %d/%d)", uid, (int)elapsed_ms,
-             retry_attempt, RUDP_MAX_RETRIES);
+    RUDP_IP_CHANNEL_STAT("Retransmitting packet uid=%d after %d ms due to HACK request (retry %d/%d)", uid,
+                         (int)elapsed_ms, retry_attempt, RUDP_MAX_RETRIES);
   }
 
   int send_ret = _RUdpIpChannel_send_outgoing_packet(self, buffer_idx);
@@ -404,19 +597,8 @@ static void _RUdpIpChannel_handle_retransmissions(RUdpIpChannel* self) {
 static int _RUdpIpChannel_handle_outgoing_ack(RUdpIpChannel* self, int uid, int ack_packet_type) {
   assert(ack_packet_type == RUDP_PACKET_TYPE_ACK || ack_packet_type == RUDP_PACKET_TYPE_FACK);
 
-  char ack_packet[9] = {0};
-  ack_packet[0] = ack_packet_type & 0x0F;
-  *(int*)(ack_packet + 1) = uid;
-  *(int*)(ack_packet + 5) = 0; // payload length of 0 for ACK packets
-
   RUDP_IP_CHANNEL_DEBUG("Sending ACK for received packet; uid=%d", uid);
-
-  ssize_t sent = send(self->fd, ack_packet, sizeof(ack_packet), 0);
-  if (sent < 0) {
-    RUDP_IP_CHANNEL_ERR("Failed to send ACK errno=%d", errno);
-    return NETWORK_CHANNEL_RET_ERROR;
-  }
-  return NETWORK_CHANNEL_RET_OK;
+  return _RUdpIpChannel_send_control_packet(self, ack_packet_type, uid, 0);
 }
 
 /**
@@ -432,7 +614,7 @@ static void _RUdpIpChannel_handle_received_ack(RUdpIpChannel* self, int uid) {
     /* Signal send_blocking that a slot is now free */
     k_sem_give(&self->tx_slots_sem);
   } else {
-    RUDP_IP_CHANNEL_DEBUG("Received ACK for unknown uid=%d", uid);
+    RUDP_IP_CHANNEL_WARN("Received ACK for unknown uid=%d", uid);
     k_mutex_unlock(&self->mutex);
   }
 }
@@ -445,16 +627,22 @@ static void _RUdpIpChannel_handle_received_ack(RUdpIpChannel* self, int uid) {
  * size grows. We could optimize this by checking if there are actually unacked "holes" before doing this loop, and
  * otherwise, just handle the FACK like an ACK.
  */
-static void _RUdpIpCHannel_handle_received_fack(RUdpIpChannel* self, int uid) {
+static void _RUdpIpChannel_handle_received_fack(RUdpIpChannel* self, int uid) {
+  int freed_slots = 0;
+
   k_mutex_lock(&self->mutex, K_FOREVER);
   for (int i = 0; i < RUDP_OUTGOING_BUFFER_SIZE; i++) {
     if (!self->outgoing_buffer[i].is_acked && self->outgoing_buffer[i].uid <= uid) {
       RUDP_IP_CHANNEL_DEBUG("FACK received for uid=%d, marking as acknowledged", self->outgoing_buffer[i].uid);
       self->outgoing_buffer[i].is_acked = true;
-      k_sem_give(&self->tx_slots_sem);
+      freed_slots++;
     }
   }
   k_mutex_unlock(&self->mutex);
+
+  for (int i = 0; i < freed_slots; i++) {
+    k_sem_give(&self->tx_slots_sem);
+  }
 }
 
 /**
@@ -467,10 +655,11 @@ static void _RUdpIpChannel_handle_received_hack(RUdpIpChannel* self, int uid, in
 
   RUDP_IP_CHANNEL_DEBUG("Received HACK for packet uid=%d, requesting retransmission of uid=%d", uid, uid_to_retransmit);
 
-#ifdef RUDP_IP_CHANNEL_LOG_STATS
+#ifdef RUDP_IP_CHANNEL_RUDP_IP_CHANNEL_STATS
   int acked_by_hole = 0;
 #endif
   int slot = -1;
+  int freed_slots = 0;
   k_mutex_lock(&self->mutex, K_FOREVER);
 
   // Find the requested packet to retransmit, and at the same time,
@@ -484,10 +673,10 @@ static void _RUdpIpChannel_handle_received_hack(RUdpIpChannel* self, int uid, in
 
     if (pkt->uid < uid_to_retransmit) {
       pkt->is_acked = true;
-#ifdef RUDP_IP_CHANNEL_LOG_STATS
+#ifdef RUDP_IP_CHANNEL_RUDP_IP_CHANNEL_STATS
       acked_by_hole++;
 #endif
-      k_sem_give(&self->tx_slots_sem);
+      freed_slots++;
       continue;
     }
 
@@ -498,10 +687,14 @@ static void _RUdpIpChannel_handle_received_hack(RUdpIpChannel* self, int uid, in
 
   k_mutex_unlock(&self->mutex);
 
-#ifdef RUDP_IP_CHANNEL_LOG_STATS
+  for (int i = 0; i < freed_slots; i++) {
+    k_sem_give(&self->tx_slots_sem);
+  }
+
+#ifdef RUDP_IP_CHANNEL_RUDP_IP_CHANNEL_STATS
   if (acked_by_hole > 0) {
     RUDP_IP_CHANNEL_DEBUG("HACK inferred ACK for %d pending packets with uid < %d", acked_by_hole, uid_to_retransmit);
-    LOG_STAT("HACK inferred ACK for %d pending packets with uid < %d", acked_by_hole, uid_to_retransmit);
+    RUDP_IP_CHANNEL_STAT("HACK inferred ACK for %d pending packets with uid < %d", acked_by_hole, uid_to_retransmit);
   }
 #endif
 
@@ -515,15 +708,14 @@ static void _RUdpIpChannel_handle_received_hack(RUdpIpChannel* self, int uid, in
 /**
  * Store a received data packet in the incoming buffer and deliver in-order packets to callback.
  */
-static void _RUdpIpChannel_handle_received_data(RUdpIpChannel* self, int uid, const unsigned char* payload,
-                                                int payload_length) {
+static void _RUdpIpChannel_handle_received_data(RUdpIpChannel* self, int uid, const char* payload, int payload_length) {
   if (payload_length < 0 || payload_length > RUDP_IP_CHANNEL_BUFFER_SIZE) {
     RUDP_IP_CHANNEL_ERR("Invalid payload length %d", payload_length);
     return;
   }
 
   if (packets_received++ % 100 == 0) {
-    LOG_STAT("%u packets received, %u duplicates", packets_received, packets_received_duplicates);
+    RUDP_IP_CHANNEL_STAT("%u packets received, %u duplicates", packets_received, packets_received_duplicates);
   }
 
   RUDP_IP_CHANNEL_DEBUG("Received data packet uid=%d, payload_length=%d, next_expected=%d", uid, payload_length,
@@ -589,8 +781,8 @@ static void _RUdpIpChannel_handle_received_data(RUdpIpChannel* self, int uid, co
 #else /* send advanced HACK */
     unsigned char hack_packet[9] = {0};
     hack_packet[0] = RUDP_PACKET_TYPE_HACK & 0x0F;
-    *(int*)(hack_packet + 1) = uid;
-    *(int*)(hack_packet + 5) = pending_uid;
+    _RUdpIpChannel_write_i32_unaligned(hack_packet + 1, uid);
+    _RUdpIpChannel_write_i32_unaligned(hack_packet + 5, pending_uid);
 
     RUDP_IP_CHANNEL_DEBUG("Sending HACK for received packet uid=%d, next_expected_uid=%d", uid,
                           self->next_expected_uid);
@@ -668,8 +860,8 @@ static lf_ret_t RUdpIpChannel_send_blocking(NetworkChannel* untyped_self, const 
 
   /* Serialize packet: [type][uid:4][length:4][payload] */
   pkt->packet_data[0] = RUDP_PACKET_TYPE_DATA;
-  *(int*)(pkt->packet_data + 1) = self->next_uid;
-  *(int*)(pkt->packet_data + 5) = data_length;
+  _RUdpIpChannel_write_i32_unaligned(pkt->packet_data + 1, self->next_uid);
+  _RUdpIpChannel_write_i32_unaligned(pkt->packet_data + 5, data_length);
   memcpy(pkt->packet_data + 9, self->write_buffer, (size_t)data_length);
 
   pkt->packet_length = 9 + data_length;
@@ -728,6 +920,61 @@ static void RUdpIpChannel_free(NetworkChannel* untyped_self) {
   RUdpIpChannel_close_connection(untyped_self);
 }
 
+/**
+ * Handle the connection in progress state: perform handshake steps and process incoming handshake packets.
+ * This is called from the worker thread when the channel is in CONNECTION_IN_PROGRESS state.
+ *
+ * This makes sure that both clients and servers can perform the handshake and respond to each other's
+ * handshake packets until the handshake is complete and we transition to CONNECTED state.
+ */
+static void _RUdpIpChannel_handle_connection_in_progress(RUdpIpChannel* self) {
+  if (self->is_client_role) {
+    int64_t now = k_uptime_get();
+    if (!self->handshake_hello_acked) {
+      if (!self->handshake_hello_sent ||
+          (now - self->handshake_last_hello_send_time_ms) >= RUDP_RETRANSMIT_TIMEOUT_MS) {
+        if (_RUdpIpChannel_send_client_hello(self) != NETWORK_CHANNEL_RET_OK) {
+          _RUdpIpChannel_update_state(self, NETWORK_CHANNEL_STATE_LOST_CONNECTION);
+          return;
+        }
+      }
+    } else if (!self->handshake_ready_acked) {
+      if (!self->handshake_ready_sent ||
+          (now - self->handshake_last_ready_send_time_ms) >= RUDP_RETRANSMIT_TIMEOUT_MS) {
+        if (_RUdpIpChannel_send_client_ready(self) != NETWORK_CHANNEL_RET_OK) {
+          _RUdpIpChannel_update_state(self, NETWORK_CHANNEL_STATE_LOST_CONNECTION);
+          return;
+        }
+      }
+    }
+  }
+
+  ssize_t bytes_received = recv(self->fd, self->read_buffer, sizeof(self->read_buffer), 0);
+  if (bytes_received < 0) {
+    switch (errno) {
+    case EAGAIN:
+#if defined(EWOULDBLOCK) && (EWOULDBLOCK != EAGAIN)
+    case EWOULDBLOCK:
+#endif
+    case EINTR:
+      return;
+    default:
+      RUDP_IP_CHANNEL_ERR("RUDP handshake recv failed errno=%d", errno);
+      _RUdpIpChannel_update_state(self, NETWORK_CHANNEL_STATE_LOST_CONNECTION);
+      return;
+    }
+  }
+
+  if (bytes_received == 0) {
+    RUDP_IP_CHANNEL_WARN("RUDP peer became unavailable during handshake");
+    _RUdpIpChannel_update_state(self, NETWORK_CHANNEL_STATE_LOST_CONNECTION);
+    return;
+  }
+
+  int packet_type = _RUdpIpChannel_packet_type(self->read_buffer, (size_t)bytes_received);
+  _RUdpIpChannel_dispatch_received_packet(self, packet_type, (size_t)bytes_received);
+}
+
 static void _RUdpIpChannel_handle_connected(RUdpIpChannel* self) {
   /* Blocking recv: returns immediately on packet arrival, or after SO_RCVTIMEO
    * (= RUDP_RETRANSMIT_TIMEOUT_MS) when quiet, which triggers retransmission checks.
@@ -767,32 +1014,9 @@ static void _RUdpIpChannel_handle_connected(RUdpIpChannel* self) {
     return;
   }
 
-  int uid = _RUdpIpChannel_protocol_extract_uid(self->read_buffer, (size_t)bytes_received);
+  int packet_type = _RUdpIpChannel_packet_type(self->read_buffer, (size_t)bytes_received);
 
-  if (_RUdpIpChannel_is_ack_packet(self->read_buffer, (size_t)bytes_received)) {
-    _RUdpIpChannel_handle_received_ack(self, uid);
-    return;
-  }
-
-  if (_RUdpIpChannel_is_fack_packet(self->read_buffer, (size_t)bytes_received)) {
-    _RUdpIpCHannel_handle_received_fack(self, uid);
-    return;
-  }
-
-  if (_RUdpIpChannel_is_hack_packet(self->read_buffer, (size_t)bytes_received)) {
-    int uid_to_retransmit = *(int*)(self->read_buffer + 5);
-    _RUdpIpChannel_handle_received_hack(self, uid, uid_to_retransmit);
-    return;
-  }
-
-  /* This is a data packet */
-  int payload_length = (int)bytes_received - 9;
-  if (payload_length < 0) {
-    RUDP_IP_CHANNEL_WARN("Invalid data packet length %d", (int)bytes_received);
-    return;
-  }
-
-  _RUdpIpChannel_handle_received_data(self, uid, self->read_buffer + 9, payload_length);
+  _RUdpIpChannel_dispatch_received_packet(self, packet_type, (size_t)bytes_received);
 }
 
 static void _RUdpIpChannel_worker_thread(void* p1, void* p2, void* p3) {
@@ -806,7 +1030,8 @@ static void _RUdpIpChannel_worker_thread(void* p1, void* p2, void* p3) {
     switch (_RUdpIpChannel_get_state(self)) {
     case NETWORK_CHANNEL_STATE_OPEN:
       if (_RUdpIpChannel_connect(self) == NETWORK_CHANNEL_RET_OK) {
-        _RUdpIpChannel_update_state(self, NETWORK_CHANNEL_STATE_CONNECTED);
+        _RUdpIpChannel_reset_handshake_state(self);
+        _RUdpIpChannel_update_state(self, NETWORK_CHANNEL_STATE_CONNECTION_IN_PROGRESS);
       } else {
         _RUdpIpChannel_update_state(self, NETWORK_CHANNEL_STATE_CONNECTION_FAILED);
         k_msleep(100);
@@ -817,8 +1042,13 @@ static void _RUdpIpChannel_worker_thread(void* p1, void* p2, void* p3) {
     case NETWORK_CHANNEL_STATE_LOST_CONNECTION:
       RUDP_IP_CHANNEL_WARN("RUDP channel lost connection, retrying");
       _RUdpIpChannel_close_socket(self);
+      _RUdpIpChannel_reset_handshake_state(self);
       _RUdpIpChannel_update_state(self, NETWORK_CHANNEL_STATE_OPEN);
       k_msleep(100);
+      break;
+
+    case NETWORK_CHANNEL_STATE_CONNECTION_IN_PROGRESS:
+      _RUdpIpChannel_handle_connection_in_progress(self);
       break;
 
     case NETWORK_CHANNEL_STATE_CONNECTED: {
@@ -830,12 +1060,6 @@ static void _RUdpIpChannel_worker_thread(void* p1, void* p2, void* p3) {
       _RUdpIpChannel_handle_connected(self);
       break;
     }
-    case NETWORK_CHANNEL_STATE_CONNECTION_IN_PROGRESS:
-      // TODO: We don't have a real "connection in progress" state with UDP. We should add a handshake-based
-      // connection establishment to move to this state, and and handle this case properly. For now, we don't
-      // expect to reach this state. Arbitrarily sleep here to avoid busy loop if we do reach it.
-      k_msleep(10);
-      break;
     case NETWORK_CHANNEL_STATE_UNINITIALIZED:
     case NETWORK_CHANNEL_STATE_CLOSED:
       k_msleep(10);
@@ -845,7 +1069,7 @@ static void _RUdpIpChannel_worker_thread(void* p1, void* p2, void* p3) {
 }
 
 void RUdpIpChannel_ctor(RUdpIpChannel* self, const char* local_host, unsigned short local_port, const char* remote_host,
-                        unsigned short remote_port, int protocol_family) {
+                        unsigned short remote_port, int protocol_family, bool is_client_role) {
   assert(self != NULL);
   assert(local_host != NULL);
   assert(remote_host != NULL);
@@ -868,10 +1092,12 @@ void RUdpIpChannel_ctor(RUdpIpChannel* self, const char* local_host, unsigned sh
   self->remote_host = remote_host;
   self->remote_port = remote_port;
   self->protocol_family = protocol_family;
+  self->is_client_role = is_client_role;
   self->federated_connection = NULL;
   self->receive_callback = NULL;
   self->worker_thread_started = false;
   self->worker_thread_id = NULL;
+  _RUdpIpChannel_reset_handshake_state(self);
 
   /* Initialize buffers */
   for (int i = 0; i < RUDP_OUTGOING_BUFFER_SIZE; i++) {

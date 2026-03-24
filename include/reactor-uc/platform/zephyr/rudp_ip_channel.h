@@ -57,6 +57,7 @@ struct RUdpIpChannel {
   const char* remote_host;
   unsigned short remote_port;
   int protocol_family;
+  bool is_client_role;
 
   bool worker_thread_started;
   struct k_thread worker_thread;
@@ -81,9 +82,19 @@ struct RUdpIpChannel {
 
   FederatedConnectionBundle* federated_connection;
   void (*receive_callback)(FederatedConnectionBundle* conn, const FederateMessage* message);
+
+  /* Handshake state: client sends HELLO, server replies with HELLO_ACK. */
+  bool handshake_hello_sent;
+  bool handshake_hello_acked;
+  bool handshake_ready_sent;
+  bool handshake_ready_acked;
+  int64_t handshake_last_hello_send_time_ms;
+  int64_t handshake_last_ready_send_time_ms;
+  int handshake_hello_retry_count;
+  int handshake_ready_retry_count;
 };
 
 void RUdpIpChannel_ctor(RUdpIpChannel* self, const char* local_host, unsigned short local_port, const char* remote_host,
-                        unsigned short remote_port, int protocol_family);
+                        unsigned short remote_port, int protocol_family, bool is_client_role);
 
 #endif // R_UDP_IP_CHANNEL_H

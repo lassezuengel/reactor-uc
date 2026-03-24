@@ -454,8 +454,7 @@ class UcTcpIpChannel(
   ): Pair<ClockSyncIpEndpoint, ClockSyncIpEndpoint> {
     if (clockSyncEndpoints == null) {
       clockSyncEndpoints =
-          resolveClockSyncEndpoints(
-              srcTcp, destTcp, srcClockSyncInterface, destClockSyncInterface)
+          resolveClockSyncEndpoints(srcTcp, destTcp, srcClockSyncInterface, destClockSyncInterface)
     }
     return clockSyncEndpoints!!
   }
@@ -522,16 +521,19 @@ class UcRudpIpChannel(
     return clockSyncEndpoints!!
   }
 
-  private fun ctorString(local: UcRudpIpEndpoint, remote: UcRudpIpEndpoint): String {
-    return "RUdpIpChannel_ctor(&self->channel, \"${local.ipAddress.address}\", ${local.port}, \"${remote.ipAddress.address}\", ${remote.port}, ${protocolFamily});"
+  private fun ctorString(isServer: Boolean): String {
+    var (me, other) = if (isServer) Pair(srcRudp, destRudp) else Pair(destRudp, srcRudp)
+
+    val role = if (isServer) "true" else "false"
+    return "RUdpIpChannel_ctor(&self->channel, \"${me.ipAddress.address}\", ${me.port}, \"${other.ipAddress.address}\", ${other.port}, ${protocolFamily}, ${role});"
   }
 
   override fun generateChannelCtorSrc(): String {
-    return ctorString(srcRudp, destRudp)
+    return ctorString(serverLhs)
   }
 
   override fun generateChannelCtorDest(): String {
-    return ctorString(destRudp, srcRudp)
+    return ctorString(!serverLhs)
   }
 
   override fun supportsClockSyncUdpChannel(): Boolean = true

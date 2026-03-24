@@ -234,6 +234,7 @@ class UcPlatformArtifactGeneratorZephyr(
         .property("NET_MAX_CONN", maxConnections)
         .property("ZVFS_OPEN_MAX", "16")
         .property("NET_IF_MAX_IPV6_COUNT", "2")
+        .property("NET_CONTEXT_RCVTIMEO", "y")
         .heading("IEEE802.15.4 6LoWPAN")
         .property("BT", "n")
         .property("NET_UDP", "y")
