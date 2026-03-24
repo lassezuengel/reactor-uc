@@ -52,6 +52,7 @@ class UcMakeGeneratorFederated(
         channelTypes.joinWithLn {
           when (it) {
             NetworkChannelType.TCP_IP -> "CFLAGS += -DNETWORK_CHANNEL_TCP"
+            NetworkChannelType.RUDP_IP -> "CFLAGS += -DNETWORK_CHANNEL_RUDP_IP"
             NetworkChannelType.COAP_UDP_IP -> "CFLAGS += -DNETWORK_CHANNEL_COAP"
             NetworkChannelType.UART -> "CFLAGS += -DNETWORK_CHANNEL_UART"
             NetworkChannelType.S4NOC -> "CFLAGS += -DNETWORK_CHANNEL_S4NOC"

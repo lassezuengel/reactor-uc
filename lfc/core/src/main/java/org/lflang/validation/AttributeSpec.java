@@ -298,6 +298,12 @@ public class AttributeSpec {
                 new AttrParamSpec("name", AttrParamType.STRING, true),
                 new AttrParamSpec("address", AttrParamType.STRING, true))));
     ATTRIBUTE_SPECS_BY_NAME.put(
+        "interface_rudp",
+        new AttributeSpec(
+            List.of(
+                new AttrParamSpec("name", AttrParamType.STRING, true),
+                new AttrParamSpec("address", AttrParamType.STRING, true))));
+    ATTRIBUTE_SPECS_BY_NAME.put(
         "interface_coap",
         new AttributeSpec(
             List.of(

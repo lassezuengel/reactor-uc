@@ -13,6 +13,7 @@
 #include <sys/select.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <unistd.h>
 #include <pthread.h>
 
@@ -144,6 +145,15 @@ static NetworkChannelState _TcpIpChannel_get_state(TcpIpChannel* self) {
   return state;
 }
 
+static lf_ret_t _TcpIpChannel_enable_tcp_nodelay(TcpIpChannel* self, int fd) {
+  int flag = 1;
+  if (setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(flag)) < 0) {
+    TCP_IP_CHANNEL_ERR("Error setting socket option TCP_NODELAY errno=%d", errno);
+    return LF_ERR;
+  }
+  return LF_OK;
+}
+
 static lf_ret_t _TcpIpChannel_reset_socket(TcpIpChannel* self) {
   FD_ZERO(&self->set);
   if (self->fd > 0) {
@@ -172,6 +182,10 @@ static lf_ret_t _TcpIpChannel_reset_socket(TcpIpChannel* self) {
 
   if (setsockopt(self->fd, SOL_SOCKET, SO_REUSEADDR, &(int){1}, sizeof(int)) < 0) {
     TCP_IP_CHANNEL_ERR("Error setting socket options: SO_REUSEADDR errno=%d", errno);
+    return LF_ERR;
+  }
+
+  if (_TcpIpChannel_enable_tcp_nodelay(self, self->fd) != LF_OK) {
     return LF_ERR;
   }
 
@@ -255,6 +269,10 @@ static lf_ret_t _TcpIpChannel_try_connect_server(NetworkChannel* untyped_self) {
 
   new_socket = accept(self->fd, (struct sockaddr*)&address, &addrlen);
   if (new_socket >= 0) {
+    if (_TcpIpChannel_enable_tcp_nodelay(self, new_socket) != LF_OK) {
+      close(new_socket);
+      return LF_ERR;
+    }
     self->client = new_socket;
     FD_SET(new_socket, &self->set);
     char addr_str[INET6_ADDRSTRLEN] = {0};

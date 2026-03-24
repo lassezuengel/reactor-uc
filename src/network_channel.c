@@ -11,6 +11,9 @@
 #include "platform/posix/tcp_ip_channel.c"
 #endif
 #include "platform/zephyr/udp_ip_channel.c"
+#ifdef NETWORK_CHANNEL_RUDP_IP
+#include "platform/zephyr/rudp_ip_channel.c"
+#endif
 #elif defined(PLATFORM_RIOT)
 #ifdef NETWORK_CHANNEL_TCP_POSIX
 #include "platform/posix/tcp_ip_channel.c"

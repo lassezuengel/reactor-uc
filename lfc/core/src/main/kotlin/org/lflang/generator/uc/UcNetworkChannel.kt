@@ -8,6 +8,7 @@ import org.lflang.lf.Attribute
 // An enumeration of the supported NetworkChannels
 enum class NetworkChannelType {
   TCP_IP,
+  RUDP_IP,
   CUSTOM,
   COAP_UDP_IP,
   S4NOC,
@@ -36,6 +37,7 @@ object UcNetworkInterfaceFactory {
     val protocol = attr.attrName.substringAfter("_")
     return when (protocol) {
       "tcp" -> UcTcpIpInterface.fromAttribute(federate, attr, allocator)
+      "rudp" -> UcRudpIpInterface.fromAttribute(federate, attr, allocator)
       "uart" -> UcUARTInterface.fromAttribute(federate, attr)
       "coap" -> UcCoapUdpIpInterface.fromAttribute(federate, attr, allocator)
       "s4noc" -> UcS4NocInterface.fromAttribute(federate, attr)
@@ -58,6 +60,9 @@ object UcNetworkInterfaceFactory {
 abstract class UcNetworkEndpoint(val iface: UcNetworkInterface)
 
 class UcTcpIpEndpoint(val ipAddress: IPAddress, val port: Int, iface: UcTcpIpInterface) :
+    UcNetworkEndpoint(iface) {}
+
+class UcRudpIpEndpoint(val ipAddress: IPAddress, val port: Int, iface: UcRudpIpInterface) :
     UcNetworkEndpoint(iface) {}
 
 class UcUARTEndpoint(
@@ -122,6 +127,40 @@ class UcTcpIpInterface(private val ipAddress: IPAddress, name: String? = null) :
       val name = attr.getParamString("name")
       val ip = allocator.allocateAddress(federate, attr) { IPAddress.fromString("127.0.0.1") }
       return UcTcpIpInterface(ip, name)
+    }
+  }
+}
+
+class UcRudpIpInterface(private val ipAddress: IPAddress, name: String? = null) :
+    UcNetworkInterface(RUDP_IP, name ?: "rudp") {
+  private val portManager = IpAddressManager.getPortManager(ipAddress)
+  override val includeHeaders: String = ""
+  override val compileDefs: String = "NETWORK_CHANNEL_RUDP_IP"
+
+  fun getIpAddress(): IPAddress = ipAddress
+
+  fun createEndpoint(port: Int?): UcRudpIpEndpoint {
+    val portNum =
+        if (port != null) {
+          portManager.reservePortNumber(port)
+          port
+        } else {
+          portManager.acquirePortNumber()
+        }
+    val ep = UcRudpIpEndpoint(ipAddress, portNum, this)
+    endpoints.add(ep)
+    return ep
+  }
+
+  companion object {
+    fun fromAttribute(
+        federate: UcFederate,
+        attr: Attribute,
+        allocator: NetworkInterfaceAllocator
+    ): UcRudpIpInterface {
+      val name = attr.getParamString("name")
+      val ip = allocator.allocateAddress(federate, attr) { IPAddress.fromString("127.0.0.1") }
+      return UcRudpIpInterface(ip, name)
     }
   }
 }
@@ -242,6 +281,18 @@ abstract class UcNetworkChannel(
   /** Generate code calling the constructor of the destination endpoint */
   abstract fun generateChannelCtorDest(): String
 
+  open fun supportsClockSyncUdpChannel(): Boolean = false
+
+  open fun generateClockSyncUdpChannelCtorSrc(
+      srcClockSyncInterface: UcNetworkInterface? = null,
+      destClockSyncInterface: UcNetworkInterface? = null
+  ): String? = null
+
+  open fun generateClockSyncUdpChannelCtorDest(
+      srcClockSyncInterface: UcNetworkInterface? = null,
+      destClockSyncInterface: UcNetworkInterface? = null
+  ): String? = null
+
   abstract val codeType: String
 
   companion object {
@@ -291,6 +342,14 @@ abstract class UcNetworkChannel(
           channel = UcTcpIpChannel(srcEp, destEp, serverLhs, useIpv6)
         }
 
+        RUDP_IP -> {
+          val srcEp =
+              (srcIf as UcRudpIpInterface).createEndpoint(if (serverLhs) serverPort else null)
+          val destEp =
+              (destIf as UcRudpIpInterface).createEndpoint(if (!serverLhs) serverPort else null)
+          channel = UcRudpIpChannel(srcEp, destEp, serverLhs, useIpv6)
+        }
+
         UART -> {
           val srcEp = (srcIf as UcUARTInterface).createEndpoint()
           val destEp = (destIf as UcUARTInterface).createEndpoint()
@@ -320,6 +379,61 @@ abstract class UcNetworkChannel(
   }
 }
 
+private data class ClockSyncIpEndpoint(val ipAddress: IPAddress, val port: Int)
+
+private fun clockSyncEndpointFromInterface(iface: UcNetworkInterface): ClockSyncIpEndpoint {
+  return when (iface) {
+    is UcTcpIpInterface -> {
+      val ep = iface.createEndpoint(null)
+      ClockSyncIpEndpoint(ep.ipAddress, ep.port)
+    }
+    is UcRudpIpInterface -> {
+      val ep = iface.createEndpoint(null)
+      ClockSyncIpEndpoint(ep.ipAddress, ep.port)
+    }
+    else ->
+        throw IllegalArgumentException(
+            "Clock sync interface must be TCP or RUDP; got ${iface.type} (${iface.name}).")
+  }
+}
+
+private fun allocateClockSyncEndpointForMainChannel(
+    endpoint: UcNetworkEndpoint
+): ClockSyncIpEndpoint {
+  return clockSyncEndpointFromInterface(endpoint.iface)
+}
+
+private fun protocolFamilyForIp(ip: IPAddress): String {
+  return when (ip) {
+    is IPAddress.IPv4 -> "AF_INET"
+    is IPAddress.IPv6 -> "AF_INET6"
+    else -> throw IllegalArgumentException("Unknown IP address type")
+  }
+}
+
+private fun buildClockSyncCtor(
+    localEndpoint: ClockSyncIpEndpoint,
+    remoteEndpoint: ClockSyncIpEndpoint
+): String {
+  val family = protocolFamilyForIp(localEndpoint.ipAddress)
+  return "UdpIpChannel_ctor(&self->clock_sync_channel, \"${localEndpoint.ipAddress.address}\", ${localEndpoint.port}, \"${remoteEndpoint.ipAddress.address}\", ${remoteEndpoint.port}, ${family});"
+}
+
+private fun resolveClockSyncEndpoints(
+    srcMainEndpoint: UcNetworkEndpoint,
+    destMainEndpoint: UcNetworkEndpoint,
+    srcClockSyncInterface: UcNetworkInterface?,
+    destClockSyncInterface: UcNetworkInterface?
+): Pair<ClockSyncIpEndpoint, ClockSyncIpEndpoint> {
+  val srcEndpoint =
+      srcClockSyncInterface?.let { clockSyncEndpointFromInterface(it) }
+          ?: allocateClockSyncEndpointForMainChannel(srcMainEndpoint)
+  val destEndpoint =
+      destClockSyncInterface?.let { clockSyncEndpointFromInterface(it) }
+          ?: allocateClockSyncEndpointForMainChannel(destMainEndpoint)
+  return Pair(srcEndpoint, destEndpoint)
+}
+
 class UcTcpIpChannel(
     src: UcTcpIpEndpoint,
     dest: UcTcpIpEndpoint,
@@ -332,6 +446,19 @@ class UcTcpIpChannel(
   private val serverEndpoint = if (serverLhs) srcTcp else destTcp
   private val serverAddress = serverEndpoint.ipAddress.address
   private val serverPort = serverEndpoint.port
+  private var clockSyncEndpoints: Pair<ClockSyncIpEndpoint, ClockSyncIpEndpoint>? = null
+
+  private fun getClockSyncEndpoints(
+      srcClockSyncInterface: UcNetworkInterface?,
+      destClockSyncInterface: UcNetworkInterface?
+  ): Pair<ClockSyncIpEndpoint, ClockSyncIpEndpoint> {
+    if (clockSyncEndpoints == null) {
+      clockSyncEndpoints =
+          resolveClockSyncEndpoints(
+              srcTcp, destTcp, srcClockSyncInterface, destClockSyncInterface)
+    }
+    return clockSyncEndpoints!!
+  }
 
   private fun ctorString(isServer: Boolean): String {
     val role = if (isServer) "true" else "false"
@@ -348,16 +475,87 @@ class UcTcpIpChannel(
 
   fun generateChannelCtorForRole(isServer: Boolean): String = ctorString(isServer)
 
-  fun generateClockSyncUdpChannelCtorSrc(): String {
-    return "UdpIpChannel_ctor(&self->clock_sync_channel, \"${srcTcp.ipAddress.address}\", ${srcTcp.port}, \"${destTcp.ipAddress.address}\", ${destTcp.port}, ${protocolFamily});"
+  override fun supportsClockSyncUdpChannel(): Boolean = true
+
+  override fun generateClockSyncUdpChannelCtorSrc(
+      srcClockSyncInterface: UcNetworkInterface?,
+      destClockSyncInterface: UcNetworkInterface?
+  ): String {
+    val (srcEndpoint, destEndpoint) =
+        getClockSyncEndpoints(srcClockSyncInterface, destClockSyncInterface)
+    return buildClockSyncCtor(srcEndpoint, destEndpoint)
   }
 
-  fun generateClockSyncUdpChannelCtorDest(): String {
-    return "UdpIpChannel_ctor(&self->clock_sync_channel, \"${destTcp.ipAddress.address}\", ${destTcp.port}, \"${srcTcp.ipAddress.address}\", ${srcTcp.port}, ${protocolFamily});"
+  override fun generateClockSyncUdpChannelCtorDest(
+      srcClockSyncInterface: UcNetworkInterface?,
+      destClockSyncInterface: UcNetworkInterface?
+  ): String {
+    val (srcEndpoint, destEndpoint) =
+        getClockSyncEndpoints(srcClockSyncInterface, destClockSyncInterface)
+    return buildClockSyncCtor(destEndpoint, srcEndpoint)
   }
 
   override val codeType: String
     get() = "TcpIpChannel"
+}
+
+class UcRudpIpChannel(
+    src: UcRudpIpEndpoint,
+    dest: UcRudpIpEndpoint,
+    serverLhs: Boolean = true,
+    private val useIpv6: Boolean = false,
+) : UcNetworkChannel(RUDP_IP, src, dest, serverLhs) {
+  private val srcRudp = src
+  private val destRudp = dest
+  private val protocolFamily = if (useIpv6) "AF_INET6" else "AF_INET"
+  private var clockSyncEndpoints: Pair<ClockSyncIpEndpoint, ClockSyncIpEndpoint>? = null
+
+  private fun getClockSyncEndpoints(
+      srcClockSyncInterface: UcNetworkInterface?,
+      destClockSyncInterface: UcNetworkInterface?
+  ): Pair<ClockSyncIpEndpoint, ClockSyncIpEndpoint> {
+    if (clockSyncEndpoints == null) {
+      clockSyncEndpoints =
+          resolveClockSyncEndpoints(
+              srcRudp, destRudp, srcClockSyncInterface, destClockSyncInterface)
+    }
+    return clockSyncEndpoints!!
+  }
+
+  private fun ctorString(local: UcRudpIpEndpoint, remote: UcRudpIpEndpoint): String {
+    return "RUdpIpChannel_ctor(&self->channel, \"${local.ipAddress.address}\", ${local.port}, \"${remote.ipAddress.address}\", ${remote.port}, ${protocolFamily});"
+  }
+
+  override fun generateChannelCtorSrc(): String {
+    return ctorString(srcRudp, destRudp)
+  }
+
+  override fun generateChannelCtorDest(): String {
+    return ctorString(destRudp, srcRudp)
+  }
+
+  override fun supportsClockSyncUdpChannel(): Boolean = true
+
+  override fun generateClockSyncUdpChannelCtorSrc(
+      srcClockSyncInterface: UcNetworkInterface?,
+      destClockSyncInterface: UcNetworkInterface?
+  ): String {
+    val (srcEndpoint, destEndpoint) =
+        getClockSyncEndpoints(srcClockSyncInterface, destClockSyncInterface)
+    return buildClockSyncCtor(srcEndpoint, destEndpoint)
+  }
+
+  override fun generateClockSyncUdpChannelCtorDest(
+      srcClockSyncInterface: UcNetworkInterface?,
+      destClockSyncInterface: UcNetworkInterface?
+  ): String {
+    val (srcEndpoint, destEndpoint) =
+        getClockSyncEndpoints(srcClockSyncInterface, destClockSyncInterface)
+    return buildClockSyncCtor(destEndpoint, srcEndpoint)
+  }
+
+  override val codeType: String
+    get() = "RUdpIpChannel"
 }
 
 class UcUARTChannel(private val uart_src: UcUARTEndpoint, private val uart_dest: UcUARTEndpoint) :

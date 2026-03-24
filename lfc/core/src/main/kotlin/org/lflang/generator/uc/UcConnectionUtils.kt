@@ -144,12 +144,32 @@ class UcFederatedConnectionBundle(
         networkChannel.generateChannelCtorDest()
       }
 
+  fun hasClockSyncNetworkChannel(): Boolean = networkChannel.supportsClockSyncUdpChannel()
+
+  private fun getClockSyncInterfaceForFederate(
+      federate: UcFederate,
+      sideParamName: String
+  ): UcNetworkInterface? {
+    val linkAttr = AttributeUtils.getLinkAttribute(groupedConnections.first().lfConn) ?: return null
+    val sideName = linkAttr.getParamString(sideParamName)
+    val commonName = linkAttr.getParamString("clock_sync_interface")
+    val ifaceName = sideName ?: commonName
+    return ifaceName?.let { federate.getInterface(it) }
+  }
+
   fun generateClockSyncNetworkChannelCtor(federate: UcFederate): String {
-    val tcpChannel = networkChannel as UcTcpIpChannel
+    val srcClockSyncInterface = getClockSyncInterfaceForFederate(src, "clock_sync_left")
+    val destClockSyncInterface = getClockSyncInterfaceForFederate(dest, "clock_sync_right")
     return if (federate == src) {
-      tcpChannel.generateClockSyncUdpChannelCtorSrc()
+      networkChannel.generateClockSyncUdpChannelCtorSrc(
+          srcClockSyncInterface, destClockSyncInterface)
+          ?: throw IllegalArgumentException(
+              "Clock sync UDP channel requested for unsupported network channel type ${networkChannel.type}")
     } else {
-      tcpChannel.generateClockSyncUdpChannelCtorDest()
+      networkChannel.generateClockSyncUdpChannelCtorDest(
+          srcClockSyncInterface, destClockSyncInterface)
+          ?: throw IllegalArgumentException(
+              "Clock sync UDP channel requested for unsupported network channel type ${networkChannel.type}")
     }
   }
 }

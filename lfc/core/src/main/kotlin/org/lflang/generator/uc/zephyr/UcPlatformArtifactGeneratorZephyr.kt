@@ -8,6 +8,7 @@ import org.lflang.generator.ZephyrConfig
 import org.lflang.generator.uc.UcConnectionGenerator
 import org.lflang.generator.uc.UcGeneratorFactory
 import org.lflang.generator.uc.UcPlatformArtifactGenerator
+import org.lflang.generator.uc.UcRudpIpInterface
 import org.lflang.generator.uc.UcTcpIpInterface
 import org.lflang.lf.Instantiation
 import org.lflang.target.TargetConfig
@@ -176,8 +177,13 @@ class UcPlatformArtifactGeneratorZephyr(
     val devIpv6 =
         fed.federate.interfaces
             .asSequence()
-            .filterIsInstance<UcTcpIpInterface>()
-            .map { it.getIpAddress().address }
+            .mapNotNull {
+              when (it) {
+                is UcTcpIpInterface -> it.getIpAddress().address
+                is UcRudpIpInterface -> it.getIpAddress().address
+                else -> null
+              }
+            }
             .firstOrNull() ?: "fd01::${fedId++}"
 
     // TODO: note that this minimum is too small! Check how many connections we need!
@@ -195,10 +201,9 @@ class UcPlatformArtifactGeneratorZephyr(
         .property("DEBUG_INFO", "y")
         .property("RTT_CONSOLE", "y")
         .property("UART_CONSOLE", "n")
-        .property("LOG_MODE_IMMEDIATE", "y")
+        .property("LOG_MODE_IMMEDIATE", "n")
         .property("LOG", "y")
         .heading("Diagnostics and logging")
-        .property("LOG_PROCESS_THREAD", "n")
         .heading("POSIX sockets and networking")
         .property("NETWORKING", "y")
         .property("NET_IPV6", "y")
@@ -207,11 +212,11 @@ class UcPlatformArtifactGeneratorZephyr(
         .property("NET_CONNECTION_MANAGER", "y")
         .property("POSIX_API", "y")
         .heading("Network buffers")
-        .property("NET_PKT_RX_COUNT", "8")
-        .property("NET_PKT_TX_COUNT", "8")
-        .property("NET_BUF_RX_COUNT", "16")
-        .property("NET_BUF_TX_COUNT", "16")
-        .property("NET_CONTEXT_NET_PKT_POOL", "n")
+        .property("NET_PKT_RX_COUNT", "16")
+        .property("NET_PKT_TX_COUNT", "16")
+        .property("NET_BUF_RX_COUNT", "64")
+        .property("NET_BUF_TX_COUNT", "64")
+        .property("NET_CONTEXT_NET_PKT_POOL", "y")
         .heading("IP address options")
         .property("NET_IF_UNICAST_IPV6_ADDR_COUNT", "3")
         .property("NET_IF_MCAST_IPV6_ADDR_COUNT", "4")
@@ -240,15 +245,15 @@ class UcPlatformArtifactGeneratorZephyr(
         .property("NET_CONFIG_PEER_IPV4_ADDR", "\"\"")
         .property("NET_L2_IEEE802154", "y")
         .property("NET_L2_IEEE802154_SHELL", "n")
-        .property("NET_IPV6_ND", "n")
-        .property("NET_IPV6_NBR_CACHE", "n")
+        .property("NET_IPV6_ND", "y")
+        .property("NET_IPV6_NBR_CACHE", "y")
         .property("NET_CONFIG_IEEE802154_CHANNEL", "26")
         .property("NET_TCP_INIT_RETRANSMISSION_TIMEOUT", "100")
         .heading("Additional system configuration")
         .property("SYSTEM_WORKQUEUE_STACK_SIZE", "2048")
         .property("MAIN_STACK_SIZE", "4096")
         .property("LF_TCP_IP_CHANNEL_STACK_SIZE", "2048")
-        .property("HEAP_MEM_POOL_SIZE", "1024")
+        .property("HEAP_MEM_POOL_SIZE", "4096")
         .property("THREAD_CUSTOM_DATA", "y")
         .comment("Enable floating point formatting/logging support.")
         .comment("This increases code size, so feel free to disable if not needed.")

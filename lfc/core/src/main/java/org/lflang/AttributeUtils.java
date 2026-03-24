@@ -222,6 +222,7 @@ public class AttributeUtils {
    */
   public static List<Attribute> getInterfaceAttributes(Instantiation node) {
     List<Attribute> attrs = getAttributes(node);
+
     return attrs.stream()
         .filter(
             it ->

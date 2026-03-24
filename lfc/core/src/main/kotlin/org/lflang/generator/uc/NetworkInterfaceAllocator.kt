@@ -25,8 +25,8 @@ interface NetworkInterfaceAllocator {
  * A network interface allocator for IPv4 addresses. This allocator does not support address
  * reservation, so it assumes that any explicitly specified address is valid and available. For
  * federates that are part of a bank, the allocator will apply a simple offset to the specified
- * address to derive unique addresses for each bank member. If no explicit address is provided,
- * the allocator will return the loopback address.
+ * address to derive unique addresses for each bank member. If no explicit address is provided, the
+ * allocator will return the loopback address.
  */
 class Ipv4NetworkInterfaceAllocator : NetworkInterfaceAllocator {
   override val usesIpv6: Boolean = false
@@ -69,10 +69,7 @@ class Ipv4NetworkInterfaceAllocator : NetworkInterfaceAllocator {
           IpAddressManager.acquireIp(adjustedIpv4)
         } catch (ex: IllegalArgumentException) {
           throw NetworkInterfaceAllocationException(
-              federate,
-              attribute,
-              "IPv4 address ${adjustedIpv4.address} is already reserved.",
-              ex)
+              federate, attribute, "IPv4 address ${adjustedIpv4.address} is already reserved.", ex)
         }
       }
       return adjustedIpv4
@@ -86,10 +83,11 @@ class Ipv4NetworkInterfaceAllocator : NetworkInterfaceAllocator {
 }
 
 /**
- * A network interface allocator for IPv6 addresses. This allocator supports reservation of explicitly
- * specified addresses to prevent conflicts. This is needed because, for example, the ´sicslowpan´
- * net-interface requires unique IPv6 addresses for each federate, and the allocator must ensure that these
- * addresses do not conflict with each other or with automatically allocated addresses.
+ * A network interface allocator for IPv6 addresses. This allocator supports reservation of
+ * explicitly specified addresses to prevent conflicts. This is needed because, for example, the
+ * ´sicslowpan´ net-interface requires unique IPv6 addresses for each federate, and the allocator
+ * must ensure that these addresses do not conflict with each other or with automatically allocated
+ * addresses.
  */
 class Ipv6NetworkInterfaceAllocator : NetworkInterfaceAllocator {
   override val usesIpv6: Boolean = true
@@ -200,9 +198,7 @@ class Ipv6NetworkInterfaceAllocator : NetworkInterfaceAllocator {
   }
 }
 
-/**
- * Indicates a failure while assigning network interface addresses for a federate.
- * */
+/** Indicates a failure while assigning network interface addresses for a federate. */
 public class NetworkInterfaceAllocationException(
     val federate: UcFederate?,
     val attribute: Attribute?,

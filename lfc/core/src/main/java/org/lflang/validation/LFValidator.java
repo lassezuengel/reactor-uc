@@ -1024,13 +1024,14 @@ public class LFValidator extends BaseLFValidator {
       checkMaxWaitAttribute(attr);
     } else if (name.equals("board")) {
       checkBoardAttribute(attr);
-    } else if(name.equals("interface_tcp")) {
+    } else if (name.equals("interface_tcp")) {
       checkInterfaceTcpAttribute(attr);
     }
   }
 
   /**
    * Check the validity of the board attribute, which is only allowed for Zephyr federates.
+   *
    * @param attr
    */
   private void checkBoardAttribute(Attribute attr) {
@@ -1075,7 +1076,8 @@ public class LFValidator extends BaseLFValidator {
   }
 
   /**
-   * Check the validity of the interface_tcp attribute, which is only allowed for federates and should be a valid IP address or host name.
+   * Check the validity of the interface_tcp attribute, which is only allowed for federates and
+   * should be a valid IP address or host name.
    */
   private void checkInterfaceTcpAttribute(Attribute attr) {
     var container = attr.eContainer();
@@ -1090,8 +1092,8 @@ public class LFValidator extends BaseLFValidator {
     var top = instantiation.eContainer();
     if (!(top instanceof Reactor) || !((Reactor) top).isFederated()) {
       warning(
-          "interface_tcp attribute can only be used on top-level federate instantiations in a federated"
-              + " reactor.",
+          "interface_tcp attribute can only be used on top-level federate instantiations in a"
+              + " federated reactor.",
           attr,
           Literals.ATTRIBUTE__ATTR_NAME);
       return;
@@ -1108,19 +1110,17 @@ public class LFValidator extends BaseLFValidator {
     var isIpv6 = addr.matches(IPV6_REGEX);
     var isHostOrFqn = addr.matches(HOST_OR_FQN_REGEX);
     if (!isIpv4 && !isIpv6 && !isHostOrFqn) {
-      error(
-          "Invalid IP address or host name.",
-          addressParam,
-          Literals.ATTR_PARM__VALUE);
+      error("Invalid IP address or host name.", addressParam, Literals.ATTR_PARM__VALUE);
     } else {
-      var fedNetInterface = new TargetConfig(attr.eResource(), GeneratorArguments.none(), getErrorReporter())
-          .getOrDefault(FedNetInterfaceProperty.INSTANCE);
+      var fedNetInterface =
+          new TargetConfig(attr.eResource(), GeneratorArguments.none(), getErrorReporter())
+              .getOrDefault(FedNetInterfaceProperty.INSTANCE);
       if (fedNetInterface == FedNetInterface.SICSLOWPAN && !isIpv6) {
         error(
             "interface_tcp attribute for sicslowpan property only accepts IPv6 addresses.",
             addressParam,
             Literals.ATTR_PARM__VALUE);
-        }
+      }
     }
   }
 

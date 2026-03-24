@@ -165,8 +165,7 @@ void FederatedConnectionBundle_handle_tagged_msg(FederatedConnectionBundle* self
   EventPayloadPool* pool = &input->payload_pool;
 
   if (msg->payload.size > pool->payload_size) {
-    LF_ERR(FED,
-           "Incoming payload for conn %d is too large (%u bytes > %zu bytes). Dropping to avoid buffer overflow",
+    LF_ERR(FED, "Incoming payload for conn %d is too large (%u bytes > %zu bytes). Dropping to avoid buffer overflow",
            msg->conn_id, msg->payload.size, pool->payload_size);
     return;
   }
@@ -199,8 +198,8 @@ void FederatedConnectionBundle_handle_tagged_msg(FederatedConnectionBundle* self
   if (input->type == PHYSICAL_CONNECTION && lf_tag_compare(tag, input->last_known_tag) <= 0) {
     tag_t bumped_tag = lf_delay_tag(input->last_known_tag, 0);
     LF_WARN(FED,
-            "Physical federated input conn=%d required microstep bump. base_tag=" PRINTF_TAG
-            " computed_tag=" PRINTF_TAG " last_known_tag=" PRINTF_TAG " -> bumped_tag=" PRINTF_TAG,
+            "Physical federated input conn=%d required microstep bump. base_tag=" PRINTF_TAG " computed_tag=" PRINTF_TAG
+            " last_known_tag=" PRINTF_TAG " -> bumped_tag=" PRINTF_TAG,
             msg->conn_id, base_tag, tag, input->last_known_tag, bumped_tag);
     tag = bumped_tag;
   }
@@ -298,7 +297,7 @@ void FederatedConnectionBundle_msg_received_cb(FederatedConnectionBundle* self, 
     if (env_fed->do_clock_sync) {
       env_fed->clock_sync->handle_message_callback(env_fed->clock_sync, &msg->message.clock_sync_msg, self->index);
     } else {
-      LF_WARN(FED, "Received clock-sync message but clock-sync is disabled. Ignoring");
+      LF_WARN(FED, "Received clock-sync message but clock-sync is disabled. Ignoring.");
     }
 
     break;
