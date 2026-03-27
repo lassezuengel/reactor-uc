@@ -32,6 +32,19 @@ void lf_init_connection_manager(void);
  * connection manager.
  */
 void lf_wait_for_network_connection(void);
+
+/**
+ * @brief Set the IPv6 address for the default network interface.
+ * @ingroup Federated
+ *
+ * Call this after lf_wait_for_network_connection() to configure the
+ * IPv6 address. The address string should be in standard IPv6 notation
+ * (e.g., "fd01::1").
+ *
+ * @param ipv6_addr The IPv6 address string to set
+ * @return 0 on success, negative error code on failure
+ */
+int lf_set_ipv6_address(const char* ipv6_addr);
 #endif // PLATFORM_ZEPHYR
 
 #endif

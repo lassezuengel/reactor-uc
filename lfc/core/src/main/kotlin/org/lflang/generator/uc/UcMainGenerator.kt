@@ -204,6 +204,23 @@ class UcMainGeneratorFederated(
     }
   }
 
+  /**
+   * Extract the IPv6 address from the federate's network interfaces.
+   * Returns null if no IPv6-based interface is found.
+   */
+  private fun getIpv6Address(): String? {
+    return currentFederate.interfaces
+        .asSequence()
+        .mapNotNull {
+          when (it) {
+            is UcTcpIpInterface -> it.getIpAddress().address
+            is UcRudpIpInterface -> it.getIpAddress().address
+            else -> null
+          }
+        }
+        .firstOrNull()
+  }
+
   override fun generateInitializeScheduler() =
       "DynamicScheduler_ctor(&_scheduler, _lf_environment, &${eventQueueName}.super, &${systemEventQueueName}.super, &${reactionQueueName}.super, ${getDuration()}, ${keepAlive()});"
 
@@ -212,13 +229,27 @@ class UcMainGeneratorFederated(
         val needsConnectionManager =
             targetConfig.get(PlatformProperty.INSTANCE).platform() == Platform.ZEPHYR &&
                 targetConfig.get(FedNetInterfaceProperty.INSTANCE) == FedNetInterface.SICSLOWPAN
+        val ipv6Addr = if (needsConnectionManager) getIpv6Address() else null
         val connectionManagerBlock =
             if (needsConnectionManager) {
+              val ipv6Setup = if (ipv6Addr != null) {
+                """
+            |    int lf_ipv6_set_ret = lf_set_ipv6_address("$ipv6Addr");
+            |    if (lf_ipv6_set_ret != 0) {
+            |        printf("Failed to set IPv6 address (%d)\n", lf_ipv6_set_ret);
+            |        return;
+            |    }
+            |"""
+              } else {
+                ""
+              }
               """
             |#if defined(PLATFORM_ZEPHYR)
             |    printf("Waiting for network connection....\n");
             |    lf_init_connection_manager();
             |    lf_wait_for_network_connection();
+            |    printf("Setting up IPv6 address for SICSLOWPAN...\n");
+            $ipv6Setup
             |    printf("Network ready, continuing.\n");
             |#endif
             |

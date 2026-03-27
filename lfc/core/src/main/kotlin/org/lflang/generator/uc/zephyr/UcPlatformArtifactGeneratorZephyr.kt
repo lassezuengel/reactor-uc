@@ -98,7 +98,7 @@ class UcPlatformArtifactGeneratorZephyr(
     val basePrjConf =
         when (context) {
           is UcGeneratorFactory.PlatformContext.Standalone -> generatePrjConfStandalone()
-          is UcGeneratorFactory.PlatformContext.Federated -> generatePrjConfFederated(context)
+          is UcGeneratorFactory.PlatformContext.Federated -> generatePrjConfFederated()
         }
 
     val boardName = selectedBoard?.lowercase()
@@ -145,7 +145,7 @@ class UcPlatformArtifactGeneratorZephyr(
    * communication and configuration. The generated config includes settings for POSIX sockets,
    * network buffers, IP address configuration, and additional system settings.
    */
-  private fun generatePrjConfFederated(fed: UcGeneratorFactory.PlatformContext.Federated): String {
+  private fun generatePrjConfFederated(): String {
     val netInterface = targetConfig.get(FedNetInterfaceProperty.INSTANCE)
     val useIpv6 = netInterface == FedNetInterface.SICSLOWPAN
 
@@ -173,18 +173,6 @@ class UcPlatformArtifactGeneratorZephyr(
       """
           .trimMargin()
     }
-
-    val devIpv6 =
-        fed.federate.interfaces
-            .asSequence()
-            .mapNotNull {
-              when (it) {
-                is UcTcpIpInterface -> it.getIpAddress().address
-                is UcRudpIpInterface -> it.getIpAddress().address
-                else -> null
-              }
-            }
-            .firstOrNull() ?: "fd01::${fedId++}"
 
     // TODO: note that this minimum is too small! Check how many connections we need!
     // val axConnections = maxConnectionsFor(fed).toString()
@@ -228,9 +216,8 @@ class UcPlatformArtifactGeneratorZephyr(
         .heading("Network application options and configs")
         .property("NET_CONFIG_SETTINGS", "y")
         .property("NET_CONFIG_NEED_IPV4", "n")
-        .property("NET_CONFIG_NEED_IPV6", "y")
-        .property("NET_CONFIG_MY_IPV6_ADDR", "\"$devIpv6\"")
-        // .property_if(devIpv6 == "fd01::2", "NET_CONFIG_PEER_IPV6_ADDR", "\"fd01::1\"")
+        .property("NET_CONFIG_NEED_IPV6", "n")
+        .property("NET_CONFIG_MY_IPV6_ADDR", "\"\"")
         .property("NET_MAX_CONN", maxConnections)
         .property("ZVFS_OPEN_MAX", "16")
         .property("NET_IF_MAX_IPV6_COUNT", "2")
