@@ -2,6 +2,7 @@ package org.lflang.generator.uc
 
 import org.lflang.AttributeUtils
 import org.lflang.TimeValue
+import org.lflang.getWidth
 import org.lflang.generator.orNever
 import org.lflang.generator.uc.UcInstanceGenerator.Companion.codeWidth
 import org.lflang.generator.uc.UcInstanceGenerator.Companion.width
@@ -39,9 +40,9 @@ class UcConnectionChannel(val src: UcChannel, val dest: UcChannel, val conn: Con
 /**
  * A GroupedConnection is a set of ConnectionChannels that can be grouped together for efficiency.
  * All ConnectionChannels that start from the same LF port, either because of multiports, banks, or
- * multiple connections. Are grouped.
+ * multiple connections, are grouped.
  *
- * TODO: Give a better exaplanation for what a GroupedConnection is.
+ * TODO: Give a better explanation for what a GroupedConnection is.
  */
 open class UcGroupedConnection(
     val src: VarRef,
@@ -58,7 +59,14 @@ open class UcGroupedConnection(
   private var uid: Int = -1
 
   val bankWidth = srcInst?.codeWidth ?: 1
-  val portWidth = srcPort.width
+  val portWidth =
+      srcPort.widthSpec?.let {
+        if (srcInst != null) {
+          it.getWidth(listOf(srcInst))
+        } else {
+          it.getWidth()
+        }
+      } ?: 1
   val numDownstreams = {
     val frequencyMap =
         channels.groupingBy { Pair(it.src.getCodePortIdx(), it.src.getCodeBankIdx()) }.eachCount()
@@ -201,7 +209,14 @@ class UcChannel(val varRef: VarRef, val portIdx: Int, val bankIdx: Int, val fede
  */
 class UcChannelQueue(varRef: VarRef, federates: List<UcFederate>) {
   private val bankWidth = varRef.container?.width ?: 1
-  private val portWidth = (varRef.variable as Port).width
+  private val portWidth =
+      (varRef.variable as Port).widthSpec?.let {
+        if (varRef.container != null) {
+          it.getWidth(listOf(varRef.container))
+        } else {
+          it.getWidth()
+        }
+      } ?: 1
   private val isInterleaved = varRef.isInterleaved
   /** A queue of UcChannels that can be popped of as we create UcConnetions */
   private val channels = ArrayDeque<UcChannel>()
