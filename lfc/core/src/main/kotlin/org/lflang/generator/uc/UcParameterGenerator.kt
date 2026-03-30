@@ -1,6 +1,7 @@
 package org.lflang.generator.uc
 
 import org.lflang.*
+import org.lflang.ast.ASTUtils
 import org.lflang.lf.Instantiation
 import org.lflang.lf.Parameter
 import org.lflang.lf.Reactor
@@ -45,6 +46,10 @@ class UcParameterGenerator(private val reactor: Reactor, private val federate: U
           } else {
             ", i"
           }
+        } else if (federate != null) {
+          // Federate wrapper ctors do not carry parent reactor parameters as C variables.
+          // Resolve to the effective expression for this instance to avoid emitting undeclared names.
+          ", ${ASTUtils.initialValue(it, listOf(r)).toCCode()}"
         } else if (r.parameters.filter { p -> p.lhs.name == it.name }.isEmpty()) {
           ", ${it.init.expr.toCCode()}"
         } else {
