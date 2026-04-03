@@ -109,7 +109,7 @@
 #endif
 
 /** The log level of the network channels.*/
-#define LF_LOG_LEVEL_NET LF_LOG_LEVEL_INFO
+#define LF_LOG_LEVEL_NET LF_LOG_LEVEL_DEBUG
 #ifndef LF_LOG_LEVEL_NET
 #ifdef LF_LOG_LEVEL_ALL
 #define LF_LOG_LEVEL_NET LF_LOG_LEVEL_ALL

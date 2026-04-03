@@ -305,6 +305,30 @@ class UcPlatformArtifactGeneratorZephyr(
         |  help
         |    Optional Zephyr thread name used for kernel tracing and debug output.
         |
+        |config LF_RUDP_RETRANSMIT_TIMEOUT_MS
+        |  int "RUDP retransmit timeout (ms)"
+        |  default 50
+        |  help
+        |    Time in milliseconds before an unacknowledged RUDP packet is retransmitted.
+        |
+        |config LF_RUDP_MAX_RETRIES
+        |  int "RUDP max retries"
+        |  default 16
+        |  help
+        |    Maximum number of retransmission attempts before an RUDP send fails.
+        |
+        |config LF_RUDP_IP_CHANNEL_RECV_THREAD_STACK_SIZE
+        |  int "RUDP channel worker stack size"
+        |  default 2048
+        |  help
+        |    Stack size in bytes allocated for the Lingua Franca RUDP receive worker thread.
+        |
+        |config LF_RUDP_IP_CHANNEL_STATS
+        |  bool "Enable RUDP channel stats logs"
+        |  default y
+        |  help
+        |    Enable periodic RUDP statistics logs and related diagnostic counters.
+        |
         |endmenu
       """
           .trimMargin()

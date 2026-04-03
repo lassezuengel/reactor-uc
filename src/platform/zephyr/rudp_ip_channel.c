@@ -33,10 +33,14 @@ static volatile uint32_t packets_sent = 0, packets_retransmitted = 0;
 static volatile uint32_t packets_received = 0, packets_received_duplicates = 0;
 
 #ifndef RUDP_IP_CHANNEL_RUDP_IP_CHANNEL_STATS
+#if defined(CONFIG_LF_RUDP_IP_CHANNEL_STATS) && (CONFIG_LF_RUDP_IP_CHANNEL_STATS == 1)
 #define RUDP_IP_CHANNEL_RUDP_IP_CHANNEL_STATS 1
+#else
+#define RUDP_IP_CHANNEL_RUDP_IP_CHANNEL_STATS 0
+#endif
 #endif
 
-#ifdef RUDP_IP_CHANNEL_RUDP_IP_CHANNEL_STATS
+#if RUDP_IP_CHANNEL_RUDP_IP_CHANNEL_STATS
 #define RUDP_IP_CHANNEL_STAT(fmt, ...) RUDP_IP_CHANNEL_INFO("[stat] " fmt, ##__VA_ARGS__)
 #else
 #define RUDP_IP_CHANNEL_STAT(fmt, ...)                                                                                 \

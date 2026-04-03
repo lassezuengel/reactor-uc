@@ -10,15 +10,21 @@
 #include "reactor-uc/network_channel.h"
 
 #define UDP_IP_CHANNEL_EXPECTED_CONNECT_DURATION MSEC(0)
-#define UDP_IP_CHANNEL_BUFFERSIZE 1024
+#define UDP_IP_CHANNEL_BUFFERSIZE 64
 
 #ifndef UDP_IP_CHANNEL_RECV_THREAD_STACK_SIZE
-#define UDP_IP_CHANNEL_RECV_THREAD_STACK_SIZE 2048
+#define UDP_IP_CHANNEL_RECV_THREAD_STACK_SIZE 1536
 #endif
 
 typedef struct UdpIpChannel UdpIpChannel;
 typedef struct FederatedConnectionBundle FederatedConnectionBundle;
 
+/**
+ * This network channel is intended to be used for clock synchronization traffic between federates.
+ * As it does not implement any reliability mechanisms, it is not suitable for general purpose
+ * message exchange between federates. For such use cases, consider using the `TcpIpChannel`
+ * or `RudpIpChannel` implementations instead.
+ */
 struct UdpIpChannel {
   NetworkChannel super;
 
