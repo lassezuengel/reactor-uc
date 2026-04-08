@@ -90,6 +90,8 @@ struct RUdpIpChannel {
 
   /* Packet reception and transmission buffers */
   RUdpOutgoingPacket outgoing_buffer[RUDP_OUTGOING_BUFFER_SIZE];
+  /* Oldest unresolved outgoing UID (cumulative ACK frontier). */
+  int tx_base_uid;
   int next_uid;
 
   /* Ring buffer for incoming packets */

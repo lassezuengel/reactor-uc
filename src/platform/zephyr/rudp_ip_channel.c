@@ -6,6 +6,7 @@
 #include <arpa/inet.h>
 #include <errno.h>
 #include <assert.h>
+#include <limits.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/time.h>
@@ -86,6 +87,22 @@ static void _RUdpIpChannel_handle_received_ack(RUdpIpChannel* self, int uid);
 static void _RUdpIpChannel_handle_received_fack(RUdpIpChannel* self, int uid);
 static void _RUdpIpChannel_handle_received_hack(RUdpIpChannel* self, int uid, int uid_to_retransmit);
 static void _RUdpIpChannel_handle_received_data(RUdpIpChannel* self, int uid, const char* payload, int payload_length);
+static int _RUdpIpChannel_release_contiguous_acked_locked(RUdpIpChannel* self);
+
+static bool _RUdpIpChannel_is_retryable_send_errno(int err) {
+  switch (err) {
+  case EINTR:
+  case EAGAIN:
+#if defined(EWOULDBLOCK) && (EWOULDBLOCK != EAGAIN)
+  case EWOULDBLOCK:
+#endif
+  case ENOBUFS:
+  case ENOMEM:
+    return true;
+  default:
+    return false;
+  }
+}
 
 /**
  * Reads a 32-bit integer from an unaligned memory location.
@@ -436,6 +453,11 @@ static void _RUdpIpChannel_dispatch_received_packet(RUdpIpChannel* self, int pac
     return;
 
   case RUDP_PACKET_TYPE_HACK: {
+    if (bytes_received < 9) {
+      RUDP_IP_CHANNEL_WARN("Received malformed HACK packet (%d bytes), discarding", (int)bytes_received);
+      return;
+    }
+
     int uid_to_retransmit = _RUdpIpChannel_read_i32_unaligned(self->read_buffer + 5);
     _RUdpIpChannel_handle_received_hack(self, uid, uid_to_retransmit);
     return;
@@ -476,12 +498,12 @@ static int _RUdpIpChannel_protocol_extract_uid(const char* data, size_t length) 
 }
 
 /**
- * Find an empty slot in the outgoing buffer (one that is acknowledged and can be reused).
+ * Find an empty slot in the outgoing buffer (uid == -1 means cumulatively released).
  * Returns index >= 0 on success, or -1 if buffer is full.
  */
 static int _RUdpIpChannel_find_empty_outgoing_slot(RUdpIpChannel* self) {
   for (int i = 0; i < RUDP_OUTGOING_BUFFER_SIZE; i++) {
-    if (self->outgoing_buffer[i].is_acked) {
+    if (self->outgoing_buffer[i].uid < 0) {
       return i;
     }
   }
@@ -501,6 +523,62 @@ static int _RUdpIpChannel_find_outgoing_slot_by_uid(RUdpIpChannel* self, int uid
   return -1;
 }
 
+static int _RUdpIpChannel_find_outgoing_slot_any_by_uid(RUdpIpChannel* self, int uid) {
+  for (int i = 0; i < RUDP_OUTGOING_BUFFER_SIZE; i++) {
+    if (self->outgoing_buffer[i].uid == uid) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+static int _RUdpIpChannel_release_contiguous_acked_locked(RUdpIpChannel* self) {
+  int released = 0;
+
+  while (self->tx_base_uid < self->next_uid) {
+    int slot = _RUdpIpChannel_find_outgoing_slot_any_by_uid(self, self->tx_base_uid);
+    if (slot < 0) {
+      int min_unacked_uid = INT_MAX;
+      for (int i = 0; i < RUDP_OUTGOING_BUFFER_SIZE; i++) {
+        RUdpOutgoingPacket* p = &self->outgoing_buffer[i];
+        if (p->uid >= 0 && !p->is_acked && p->uid < min_unacked_uid) {
+          min_unacked_uid = p->uid;
+        }
+      }
+
+      if (min_unacked_uid == INT_MAX) {
+        RUDP_IP_CHANNEL_WARN("Missing outgoing slot for tx_base_uid=%d (next_uid=%d), resyncing base to next_uid",
+                             self->tx_base_uid, self->next_uid);
+        self->tx_base_uid = self->next_uid;
+      } else if (min_unacked_uid > self->tx_base_uid) {
+        RUDP_IP_CHANNEL_WARN(
+            "Missing outgoing slot for tx_base_uid=%d (next_uid=%d), resyncing base to min_unacked_uid=%d",
+            self->tx_base_uid, self->next_uid, min_unacked_uid);
+        self->tx_base_uid = min_unacked_uid;
+        continue;
+      } else {
+        RUDP_IP_CHANNEL_WARN("Missing outgoing slot for tx_base_uid=%d (next_uid=%d), cannot resync safely",
+                             self->tx_base_uid, self->next_uid);
+      }
+      break;
+    }
+
+    RUdpOutgoingPacket* pkt = &self->outgoing_buffer[slot];
+    if (!pkt->is_acked) {
+      break;
+    }
+
+    pkt->uid = -1;
+    pkt->retry_count = 0;
+    pkt->next_allowed_hack_uid = -1;
+    pkt->last_send_time_ms = 0;
+    self->tx_base_uid++;
+    released++;
+  }
+
+  return released;
+}
+
 /**
  * Actually send a packet stored in the outgoing buffer.
  */
@@ -513,6 +591,11 @@ static int _RUdpIpChannel_send_outgoing_packet(RUdpIpChannel* self, int buffer_i
   }
 
   if (bytes_sent < 0) {
+    if (_RUdpIpChannel_is_retryable_send_errno(errno)) {
+      RUDP_IP_CHANNEL_WARN("Transient send failure for uid=%d errno=%d, will retry", pkt->uid, errno);
+      return NETWORK_CHANNEL_RET_RETRY;
+    }
+
     RUDP_IP_CHANNEL_ERR("Failed to send RUDP packet uid=%d errno=%d", pkt->uid, errno);
     return NETWORK_CHANNEL_RET_ERROR;
   }
@@ -556,13 +639,17 @@ static int _RUdpIpChannel_retransmit_outgoing_packet(RUdpIpChannel* self, int bu
   if (pkt->retry_count >= RUDP_MAX_RETRIES) {
     RUDP_IP_CHANNEL_WARN("RUDP packet uid=%d exceeded max retries, giving up", pkt->uid);
     pkt->is_acked = true;
+    int released_slots = _RUdpIpChannel_release_contiguous_acked_locked(self);
     k_mutex_unlock(&self->mutex);
-    k_sem_give(&self->tx_slots_sem);
+    for (int i = 0; i < released_slots; i++) {
+      k_sem_give(&self->tx_slots_sem);
+    }
     _RUdpIpChannel_update_state(self, NETWORK_CHANNEL_STATE_LOST_CONNECTION);
     return NETWORK_CHANNEL_RET_ERROR;
   }
 
   int64_t elapsed_ms = k_uptime_get() - pkt->last_send_time_ms;
+  int old_next_allowed_hack_uid = pkt->next_allowed_hack_uid;
 
   /* After any retransmit (timeout or HACK), only HACKs from newer sender progress
    * are allowed to trigger another HACK retransmit. This makes sure that pending
@@ -590,9 +677,31 @@ static int _RUdpIpChannel_retransmit_outgoing_packet(RUdpIpChannel* self, int bu
   }
 
   int send_ret = _RUdpIpChannel_send_outgoing_packet(self, buffer_idx);
+  if (send_ret == NETWORK_CHANNEL_RET_RETRY) {
+    /* No packet left the host; keep this slot pending without consuming retry budget
+     * or advancing HACK suppression state. */
+    k_mutex_lock(&self->mutex, K_FOREVER);
+    if (!pkt->is_acked) {
+      if (pkt->retry_count > 0) {
+        pkt->retry_count--;
+      }
+      pkt->next_allowed_hack_uid = old_next_allowed_hack_uid;
+      pkt->last_send_time_ms = k_uptime_get() - RUDP_RETRANSMIT_TIMEOUT_MS;
+    }
+    k_mutex_unlock(&self->mutex);
+    return NETWORK_CHANNEL_RET_OK;
+  }
+
   if (send_ret != NETWORK_CHANNEL_RET_OK) {
-    _RUdpIpChannel_update_state(self, NETWORK_CHANNEL_STATE_LOST_CONNECTION);
-    return send_ret;
+    /* Treat non-retry send failure as pending delivery failure, not immediate
+     * connection loss. Retry budget was already consumed for this attempt. */
+    RUDP_IP_CHANNEL_WARN("Retransmit send failed for uid=%d, keeping packet pending", uid);
+    k_mutex_lock(&self->mutex, K_FOREVER);
+    if (!pkt->is_acked) {
+      pkt->last_send_time_ms = k_uptime_get() - RUDP_RETRANSMIT_TIMEOUT_MS;
+    }
+    k_mutex_unlock(&self->mutex);
+    return NETWORK_CHANNEL_RET_OK;
   }
 
   return NETWORK_CHANNEL_RET_OK;
@@ -635,7 +744,7 @@ static void _RUdpIpChannel_handle_retransmissions(RUdpIpChannel* self) {
 static int _RUdpIpChannel_handle_outgoing_ack(RUdpIpChannel* self, int uid, int ack_packet_type) {
   assert(ack_packet_type == RUDP_PACKET_TYPE_ACK || ack_packet_type == RUDP_PACKET_TYPE_FACK);
 
-  RUDP_IP_CHANNEL_DEBUG("Sending ACK for received packet; uid=%d", uid);
+  RUDP_IP_CHANNEL_DEBUG("Sending %s for received packet; uid=%d", ack_packet_type == RUDP_PACKET_TYPE_ACK ? "ACK" : "FACK", uid);
   return _RUdpIpChannel_send_control_packet(self, ack_packet_type, uid, 0);
 }
 
@@ -643,16 +752,26 @@ static int _RUdpIpChannel_handle_outgoing_ack(RUdpIpChannel* self, int uid, int 
  * Process received ACK packet: mark the corresponding outgoing packet as acknowledged.
  */
 static void _RUdpIpChannel_handle_received_ack(RUdpIpChannel* self, int uid) {
+  int released_slots = 0;
   k_mutex_lock(&self->mutex, K_FOREVER);
+
+  if (uid < 0 || uid >= self->next_uid) {
+    RUDP_IP_CHANNEL_WARN("Received ACK with invalid uid=%d (next_uid=%d), ignoring", uid, self->next_uid);
+    k_mutex_unlock(&self->mutex);
+    return;
+  }
+
   int slot = _RUdpIpChannel_find_outgoing_slot_by_uid(self, uid);
   if (slot >= 0) {
     RUDP_IP_CHANNEL_DEBUG("ACK received for uid=%d, marking as acknowledged", uid);
     self->outgoing_buffer[slot].is_acked = true;
+    released_slots = _RUdpIpChannel_release_contiguous_acked_locked(self);
     k_mutex_unlock(&self->mutex);
-    /* Signal send_blocking that a slot is now free */
-    k_sem_give(&self->tx_slots_sem);
+    for (int i = 0; i < released_slots; i++) {
+      k_sem_give(&self->tx_slots_sem);
+    }
   } else {
-    RUDP_IP_CHANNEL_WARN("Received ACK for unknown uid=%d", uid);
+    RUDP_IP_CHANNEL_DEBUG("Received ACK for uid=%d that is not pending (likely duplicate or stale)", uid);
     k_mutex_unlock(&self->mutex);
   }
 }
@@ -667,8 +786,16 @@ static void _RUdpIpChannel_handle_received_ack(RUdpIpChannel* self, int uid) {
  */
 static void _RUdpIpChannel_handle_received_fack(RUdpIpChannel* self, int uid) {
   int freed_slots = 0;
+  int released_slots = 0;
 
   k_mutex_lock(&self->mutex, K_FOREVER);
+
+  if (uid < 0 || uid >= self->next_uid) {
+    RUDP_IP_CHANNEL_WARN("Received FACK with invalid uid=%d (next_uid=%d), ignoring", uid, self->next_uid);
+    k_mutex_unlock(&self->mutex);
+    return;
+  }
+
   for (int i = 0; i < RUDP_OUTGOING_BUFFER_SIZE; i++) {
     if (!self->outgoing_buffer[i].is_acked && self->outgoing_buffer[i].uid <= uid) {
       RUDP_IP_CHANNEL_DEBUG("FACK received for uid=%d, marking as acknowledged", self->outgoing_buffer[i].uid);
@@ -676,10 +803,16 @@ static void _RUdpIpChannel_handle_received_fack(RUdpIpChannel* self, int uid) {
       freed_slots++;
     }
   }
+  released_slots = _RUdpIpChannel_release_contiguous_acked_locked(self);
   k_mutex_unlock(&self->mutex);
 
-  for (int i = 0; i < freed_slots; i++) {
+  for (int i = 0; i < released_slots; i++) {
     k_sem_give(&self->tx_slots_sem);
+  }
+
+  if (freed_slots > released_slots) {
+    RUDP_IP_CHANNEL_DEBUG("FACK marked %d packets ACKed but only %d were cumulatively releasable", freed_slots,
+                          released_slots);
   }
 }
 
@@ -687,46 +820,103 @@ static void _RUdpIpChannel_handle_received_fack(RUdpIpChannel* self, int uid) {
  * Process received HACK packet: peer is requesting retransmission of the specified UID.
  */
 static void _RUdpIpChannel_handle_received_hack(RUdpIpChannel* self, int uid, int uid_to_retransmit) {
-  /* A HACK is essentially an ACK for the received packet (uid),
-   * combined with a request to retransmit another packet (uid_to_retransmit) that the receiver considers missing. */
-  _RUdpIpChannel_handle_received_ack(self, uid);
+  /* HACK requests retransmission of a hole UID.
+   * If the reported out-of-order packet lies within receiver buffer distance from the
+   * hole, treat it as received and ACK it. If it is too far ahead, don't ACK it to
+   * avoid sender-side runaway progress while the hole remains unresolved. */
+
+  bool ack_hack_uid = (uid > uid_to_retransmit) && ((uid - uid_to_retransmit) < RUDP_INCOMING_BUFFER_SIZE);
+  if (ack_hack_uid) {
+    _RUdpIpChannel_handle_received_ack(self, uid);
+  } else {
+    RUDP_IP_CHANNEL_DEBUG("HACK uid=%d not ACKed (hole=%d, distance=%d)", uid, uid_to_retransmit,
+                          uid - uid_to_retransmit);
+  }
 
   RUDP_IP_CHANNEL_DEBUG("Received HACK for packet uid=%d, requesting retransmission of uid=%d", uid, uid_to_retransmit);
 
 #ifdef RUDP_IP_CHANNEL_RUDP_IP_CHANNEL_STATS
   int acked_by_hole = 0;
 #endif
+  int ack_candidates[RUDP_OUTGOING_BUFFER_SIZE];
+  int ack_candidate_count = 0;
   int slot = -1;
+  bool hole_uid_present = false;
+  bool hole_uid_is_acked = false;
   int freed_slots = 0;
+  int released_slots = 0;
+
   k_mutex_lock(&self->mutex, K_FOREVER);
 
+  if (uid_to_retransmit < 0 || uid_to_retransmit >= self->next_uid) {
+    RUDP_IP_CHANNEL_WARN("Received HACK with invalid hole uid=%d (next_uid=%d), ignoring", uid_to_retransmit,
+                         self->next_uid);
+    k_mutex_unlock(&self->mutex);
+    return;
+  }
+
+  if (uid_to_retransmit >= uid) {
+    RUDP_IP_CHANNEL_WARN("Received HACK with inconsistent hole uid=%d for ack uid=%d", uid_to_retransmit, uid);
+  }
+
   // Find the requested packet to retransmit, and at the same time,
-  // mark all older packets as acknowledged since the receiver's HACK indicates
-  // that those were received.
+  // collect older pending packets that may be inferred as acknowledged.
+  // We only apply these inferred ACKs after validating that the hole UID is
+  // present and still pending.
   for (int i = 0; i < RUDP_OUTGOING_BUFFER_SIZE; i++) {
     RUdpOutgoingPacket* pkt = &self->outgoing_buffer[i];
-    if (pkt->is_acked) {
+    if (pkt->uid == uid_to_retransmit) {
+      hole_uid_present = true;
+      if (pkt->is_acked) {
+        hole_uid_is_acked = true;
+      } else {
+        slot = i;
+      }
       continue;
     }
 
-    if (pkt->uid < uid_to_retransmit) {
+    if (!pkt->is_acked && pkt->uid < uid_to_retransmit) {
+      if (ack_candidate_count < RUDP_OUTGOING_BUFFER_SIZE) {
+        ack_candidates[ack_candidate_count++] = i;
+      }
+    }
+  }
+
+  if (!hole_uid_present) {
+    RUDP_IP_CHANNEL_WARN("Received HACK for unknown hole uid=%d, ignoring inferred ACKs", uid_to_retransmit);
+    k_mutex_unlock(&self->mutex);
+    return;
+  }
+
+  if (hole_uid_is_acked || slot < 0) {
+    RUDP_IP_CHANNEL_WARN("Received HACK with hole uid=%d that is already acknowledged, ignoring inferred ACKs",
+                         uid_to_retransmit);
+    k_mutex_unlock(&self->mutex);
+    return;
+  }
+
+  for (int i = 0; i < ack_candidate_count; i++) {
+    RUdpOutgoingPacket* pkt = &self->outgoing_buffer[ack_candidates[i]];
+    if (!pkt->is_acked) {
       pkt->is_acked = true;
 #ifdef RUDP_IP_CHANNEL_RUDP_IP_CHANNEL_STATS
       acked_by_hole++;
 #endif
       freed_slots++;
-      continue;
-    }
-
-    if (pkt->uid == uid_to_retransmit) {
-      slot = i;
     }
   }
 
+  released_slots = _RUdpIpChannel_release_contiguous_acked_locked(self);
+
   k_mutex_unlock(&self->mutex);
 
-  for (int i = 0; i < freed_slots; i++) {
+  for (int i = 0; i < released_slots; i++) {
     k_sem_give(&self->tx_slots_sem);
+  }
+
+  if (freed_slots > released_slots) {
+    RUDP_IP_CHANNEL_DEBUG("HACK inferred %d ACKs but only %d were cumulatively releasable", freed_slots,
+                          released_slots);
   }
 
 #ifdef RUDP_IP_CHANNEL_RUDP_IP_CHANNEL_STATS
@@ -736,11 +926,7 @@ static void _RUdpIpChannel_handle_received_hack(RUdpIpChannel* self, int uid, in
   }
 #endif
 
-  if (slot >= 0) {
-    (void)_RUdpIpChannel_retransmit_outgoing_packet(self, slot, false, uid);
-  } else {
-    RUDP_IP_CHANNEL_DEBUG("Received HACK for unknown uid=%d", uid_to_retransmit);
-  }
+  (void)_RUdpIpChannel_retransmit_outgoing_packet(self, slot, false, uid);
 }
 
 /**
@@ -775,6 +961,19 @@ static void _RUdpIpChannel_handle_received_data(RUdpIpChannel* self, int uid, co
   if (slot_offset >= RUDP_INCOMING_BUFFER_SIZE) {
     RUDP_IP_CHANNEL_WARN("Received packet with uid=%d too far ahead (next_expected=%d), discarding", uid,
                          self->next_expected_uid);
+
+    /* Request retransmission of the oldest missing packet to recover quickly. */
+    unsigned char hack_packet[9] = {0};
+    hack_packet[0] = RUDP_PACKET_TYPE_HACK & 0x0F;
+    _RUdpIpChannel_write_i32_unaligned((char*)hack_packet + 1, uid);
+    _RUdpIpChannel_write_i32_unaligned((char*)hack_packet + 5, self->next_expected_uid);
+
+    ssize_t sent = send(self->fd, hack_packet, sizeof(hack_packet), 0);
+    if (sent < 0) {
+      RUDP_IP_CHANNEL_ERR("Failed to send HACK for too-far-ahead packet uid=%d missing=%d errno=%d", uid,
+                          self->next_expected_uid, errno);
+      _RUdpIpChannel_update_state(self, NETWORK_CHANNEL_STATE_LOST_CONNECTION);
+    }
     return;
   }
 
@@ -888,6 +1087,7 @@ static lf_ret_t RUdpIpChannel_send_blocking(NetworkChannel* untyped_self, const 
   k_mutex_lock(&self->mutex, K_FOREVER);
   int slot = _RUdpIpChannel_find_empty_outgoing_slot(self);
   if (slot < 0) {
+    RUDP_IP_CHANNEL_ERR("No free slot found in outgoing buffer despite available semaphore slot");
     /* Should not happen if semaphore is correct, but be safe */
     k_mutex_unlock(&self->mutex);
     k_sem_give(&self->tx_slots_sem);
@@ -908,20 +1108,34 @@ static lf_ret_t RUdpIpChannel_send_blocking(NetworkChannel* untyped_self, const 
   pkt->retry_count = 0;
   pkt->next_allowed_hack_uid = -1;
   pkt->last_send_time_ms = k_uptime_get();
+  int uid = pkt->uid;
 
   RUDP_IP_CHANNEL_DEBUG("Queuing data packet uid=%d, data_length=%d", self->next_uid, data_length);
   self->next_uid++;
 
   k_mutex_unlock(&self->mutex);
 
+  // TODO: Clean up
+
   /* Send the packet immediately */
   int send_result = _RUdpIpChannel_send_outgoing_packet(self, slot);
-  if (send_result != NETWORK_CHANNEL_RET_OK) {
+  if (send_result == NETWORK_CHANNEL_RET_RETRY) {
+    /* Keep packet pending and let normal retransmission logic retry it. */
+    RUDP_IP_CHANNEL_WARN("Initial send deferred for uid=%d; keeping packet queued for retransmission", uid);
     k_mutex_lock(&self->mutex, K_FOREVER);
-    pkt->is_acked = true; // Free the slot on error
+    pkt->last_send_time_ms = k_uptime_get() - RUDP_RETRANSMIT_TIMEOUT_MS;
     k_mutex_unlock(&self->mutex);
-    k_sem_give(&self->tx_slots_sem); // Return the slot count
-    return send_result;
+    return NETWORK_CHANNEL_RET_OK;
+  }
+
+  if (send_result != NETWORK_CHANNEL_RET_OK) {
+    /* Do not free the slot or mark acked: that would create a UID hole.
+     * Keep packet pending and let retransmission logic retry it. */
+    RUDP_IP_CHANNEL_WARN("Initial send failed for uid=%d; keeping packet pending for retransmission", uid);
+    k_mutex_lock(&self->mutex, K_FOREVER);
+    pkt->last_send_time_ms = k_uptime_get() - RUDP_RETRANSMIT_TIMEOUT_MS;
+    k_mutex_unlock(&self->mutex);
+    return NETWORK_CHANNEL_RET_OK;
   }
 
   return NETWORK_CHANNEL_RET_OK;
@@ -1148,6 +1362,7 @@ void RUdpIpChannel_ctor(RUdpIpChannel* self, const char* local_host, unsigned sh
     self->outgoing_buffer[i].uid = -1;
     self->outgoing_buffer[i].next_allowed_hack_uid = -1;
   }
+  self->tx_base_uid = 0;
   self->next_uid = 0;
 
   for (int i = 0; i < RUDP_INCOMING_BUFFER_SIZE; i++) {
