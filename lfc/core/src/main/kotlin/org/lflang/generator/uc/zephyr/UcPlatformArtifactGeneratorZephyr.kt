@@ -305,6 +305,18 @@ class UcPlatformArtifactGeneratorZephyr(
         |  help
         |    Optional Zephyr thread name used for kernel tracing and debug output.
         |
+        |config LF_RUDP_OUTGOING_BUFFER_SIZE
+        |  int "RUDP outgoing buffer size"
+        |  default 16
+        |  help
+        |    Number of outgoing packets that can be buffered before blocking.
+        |
+        |config LF_RUDP_INCOMING_BUFFER_SIZE
+        |  int "RUDP incoming buffer size"
+        |  default 32
+        |  help
+        |    Number of incoming packets that can be buffered before packets are dropped.
+        |
         |config LF_RUDP_RETRANSMIT_TIMEOUT_MS
         |  int "RUDP retransmit timeout (ms)"
         |  default 50
