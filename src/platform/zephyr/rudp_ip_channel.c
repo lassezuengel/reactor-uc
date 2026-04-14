@@ -89,6 +89,26 @@ static void _RUdpIpChannel_handle_received_hack(RUdpIpChannel* self, int uid, in
 static void _RUdpIpChannel_handle_received_data(RUdpIpChannel* self, int uid, const char* payload, int payload_length);
 static int _RUdpIpChannel_release_contiguous_acked_locked(RUdpIpChannel* self);
 
+/* Compute a jittered retransmit delay in the range [90%, 110%] of the base timeout. */
+static int _RUdpIpChannel_jittered_retransmit_delay_ms(int uid, int attempt) {
+  uint32_t seed = (uint32_t)k_cycle_get_32();
+  seed ^= (uint32_t)uid * 2654435761u;
+  seed ^= (uint32_t)attempt * 2246822519u;
+
+  /* xorshift32 */
+  seed ^= seed << 13;
+  seed ^= seed >> 17;
+  seed ^= seed << 5;
+
+  int jitter_percent = (int)(seed % 21u) - 10; // [-10, +10]
+  int64_t delay_ms = ((int64_t)RUDP_RETRANSMIT_TIMEOUT_MS * (100 + jitter_percent) + 50) / 100;
+  if (delay_ms < 1) {
+    delay_ms = 1;
+  }
+
+  return (int)delay_ms;
+}
+
 static bool _RUdpIpChannel_is_retryable_send_errno(int err) {
   switch (err) {
   case EINTR:
@@ -572,6 +592,7 @@ static int _RUdpIpChannel_release_contiguous_acked_locked(RUdpIpChannel* self) {
     pkt->retry_count = 0;
     pkt->next_allowed_hack_uid = -1;
     pkt->last_send_time_ms = 0;
+    pkt->retransmit_delay_ms = RUDP_RETRANSMIT_TIMEOUT_MS;
     self->tx_base_uid++;
     released++;
   }
@@ -650,6 +671,7 @@ static int _RUdpIpChannel_retransmit_outgoing_packet(RUdpIpChannel* self, int bu
 
   int64_t elapsed_ms = k_uptime_get() - pkt->last_send_time_ms;
   int old_next_allowed_hack_uid = pkt->next_allowed_hack_uid;
+  int old_retransmit_delay_ms = pkt->retransmit_delay_ms;
 
   /* After any retransmit (timeout or HACK), only HACKs from newer sender progress
    * are allowed to trigger another HACK retransmit. This makes sure that pending
@@ -660,6 +682,7 @@ static int _RUdpIpChannel_retransmit_outgoing_packet(RUdpIpChannel* self, int bu
   pkt->retry_count++;
   int retry_attempt = pkt->retry_count;
   int uid = pkt->uid;
+  pkt->retransmit_delay_ms = _RUdpIpChannel_jittered_retransmit_delay_ms(uid, retry_attempt + 1);
   packets_retransmitted++;
 
   k_mutex_unlock(&self->mutex);
@@ -686,7 +709,8 @@ static int _RUdpIpChannel_retransmit_outgoing_packet(RUdpIpChannel* self, int bu
         pkt->retry_count--;
       }
       pkt->next_allowed_hack_uid = old_next_allowed_hack_uid;
-      pkt->last_send_time_ms = k_uptime_get() - RUDP_RETRANSMIT_TIMEOUT_MS;
+      pkt->retransmit_delay_ms = old_retransmit_delay_ms;
+      pkt->last_send_time_ms = k_uptime_get() - pkt->retransmit_delay_ms;
     }
     k_mutex_unlock(&self->mutex);
     return NETWORK_CHANNEL_RET_OK;
@@ -698,7 +722,7 @@ static int _RUdpIpChannel_retransmit_outgoing_packet(RUdpIpChannel* self, int bu
     RUDP_IP_CHANNEL_WARN("Retransmit send failed for uid=%d, keeping packet pending", uid);
     k_mutex_lock(&self->mutex, K_FOREVER);
     if (!pkt->is_acked) {
-      pkt->last_send_time_ms = k_uptime_get() - RUDP_RETRANSMIT_TIMEOUT_MS;
+      pkt->last_send_time_ms = k_uptime_get() - pkt->retransmit_delay_ms;
     }
     k_mutex_unlock(&self->mutex);
     return NETWORK_CHANNEL_RET_OK;
@@ -723,7 +747,7 @@ static void _RUdpIpChannel_handle_retransmissions(RUdpIpChannel* self) {
     }
 
     int64_t elapsed = now - pkt->last_send_time_ms;
-    if (elapsed >= RUDP_RETRANSMIT_TIMEOUT_MS) {
+    if (elapsed >= pkt->retransmit_delay_ms) {
       retransmit_slot = i;
       // Send one packet at a time to avoid bursts of retransmissions;
       // will check others on next invocation
@@ -1107,6 +1131,7 @@ static lf_ret_t RUdpIpChannel_send_blocking(NetworkChannel* untyped_self, const 
   pkt->is_acked = false;
   pkt->retry_count = 0;
   pkt->next_allowed_hack_uid = -1;
+  pkt->retransmit_delay_ms = _RUdpIpChannel_jittered_retransmit_delay_ms(pkt->uid, 1);
   pkt->last_send_time_ms = k_uptime_get();
   int uid = pkt->uid;
 
@@ -1123,7 +1148,7 @@ static lf_ret_t RUdpIpChannel_send_blocking(NetworkChannel* untyped_self, const 
     /* Keep packet pending and let normal retransmission logic retry it. */
     RUDP_IP_CHANNEL_WARN("Initial send deferred for uid=%d; keeping packet queued for retransmission", uid);
     k_mutex_lock(&self->mutex, K_FOREVER);
-    pkt->last_send_time_ms = k_uptime_get() - RUDP_RETRANSMIT_TIMEOUT_MS;
+    pkt->last_send_time_ms = k_uptime_get() - pkt->retransmit_delay_ms;
     k_mutex_unlock(&self->mutex);
     return NETWORK_CHANNEL_RET_OK;
   }
@@ -1133,7 +1158,7 @@ static lf_ret_t RUdpIpChannel_send_blocking(NetworkChannel* untyped_self, const 
      * Keep packet pending and let retransmission logic retry it. */
     RUDP_IP_CHANNEL_WARN("Initial send failed for uid=%d; keeping packet pending for retransmission", uid);
     k_mutex_lock(&self->mutex, K_FOREVER);
-    pkt->last_send_time_ms = k_uptime_get() - RUDP_RETRANSMIT_TIMEOUT_MS;
+    pkt->last_send_time_ms = k_uptime_get() - pkt->retransmit_delay_ms;
     k_mutex_unlock(&self->mutex);
     return NETWORK_CHANNEL_RET_OK;
   }
@@ -1361,6 +1386,7 @@ void RUdpIpChannel_ctor(RUdpIpChannel* self, const char* local_host, unsigned sh
     self->outgoing_buffer[i].retry_count = 0;
     self->outgoing_buffer[i].uid = -1;
     self->outgoing_buffer[i].next_allowed_hack_uid = -1;
+    self->outgoing_buffer[i].retransmit_delay_ms = RUDP_RETRANSMIT_TIMEOUT_MS;
   }
   self->tx_base_uid = 0;
   self->next_uid = 0;

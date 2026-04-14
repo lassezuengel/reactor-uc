@@ -63,6 +63,7 @@ typedef struct {
   int uid;
   bool is_acked;
   int64_t last_send_time_ms;
+  int retransmit_delay_ms;
   int retry_count;
   int next_allowed_hack_uid;
 } RUdpOutgoingPacket;
