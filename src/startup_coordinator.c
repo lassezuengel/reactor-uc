@@ -199,12 +199,15 @@ static void StartupCoordinator_handle_startup_handshake_response(StartupCoordina
   switch (self->state) {
   case StartupCoordinationState_CONNECTING:
   case StartupCoordinationState_UNINITIALIZED:
-    validate(false); // Should not be possible
+    // On lossy links, delayed packets can arrive while local state has not caught up yet.
+    LF_WARN(FED, "Ignoring handshake response from federate %d while in state %d", payload->neighbor_index,
+            self->state);
     break;
   case StartupCoordinationState_NEGOTIATING:
   case StartupCoordinationState_RUNNING:
-    // This could happen if our network channel can have duplicates.
-    validate(false);
+    // This can happen due duplicate or delayed network packets. Ignore gracefully.
+    LF_WARN(FED, "Ignoring late/duplicate handshake response from federate %d while in state %d",
+            payload->neighbor_index, self->state);
     break;
   case StartupCoordinationState_HANDSHAKING: {
     self->neighbor_state[payload->neighbor_index].handshake_response_received = true;
@@ -319,9 +322,21 @@ static void StartupCoordinator_handle_start_time_proposal(StartupCoordinator* se
       // This is possible. Our node might be still handshaking with another neighbor.
       // Intentional fall-through
     case StartupCoordinationState_NEGOTIATING: {
-      // Update the number of proposals received from this neighbor and verify that the step is correct.
-      self->neighbor_state[payload->neighbor_index].start_time_proposals_received++;
-      validate(self->neighbor_state[payload->neighbor_index].start_time_proposals_received == step);
+      // Handle duplicates and out-of-order proposals gracefully on lossy links.
+      size_t* last_step = &self->neighbor_state[payload->neighbor_index].start_time_proposals_received;
+      if (step <= *last_step) {
+        LF_WARN(FED,
+                "Ignoring duplicate/stale start time proposal from federate %d: step=%zu last_step=%zu",
+                payload->neighbor_index, step, *last_step);
+        break;
+      }
+      if (step > (*last_step + 1)) {
+        LF_WARN(FED,
+                "Ignoring out-of-order start time proposal from federate %d: step=%zu expected=%zu",
+                payload->neighbor_index, step, *last_step + 1);
+        break;
+      }
+      *last_step = step;
       // Update the start time if the received proposal is larger than the current.
       if (payload->msg.message.start_time_proposal.time > self->start_time_proposal) {
         LF_DEBUG(FED, "Start time proposal from federate %d is larger than current, updating.",
@@ -485,7 +500,7 @@ static void StartupCoordinator_handle_join_time_announcement(const StartupCoordi
         const FederatedConnectionBundle* bundle = env->net_bundles[i];
         for (size_t j = 0; j < bundle->inputs_size; j++) {
           tag_t joining_time = {.time = payload->msg.message.joining_time_announcement.joining_time, .microstep = 0};
-          bundle->inputs[i]->last_known_tag = joining_time;
+          bundle->inputs[j]->last_known_tag = joining_time;
         }
       }
     }

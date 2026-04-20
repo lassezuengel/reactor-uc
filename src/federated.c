@@ -45,9 +45,18 @@ void FederatedOutputConnection_cleanup(Trigger* trigger) {
   EventPayloadPool* pool = trigger->payload_pool;
 
   if (channel->is_connected(channel)) {
-    assert(self->staged_payload_ptr);
-    assert(trigger->is_registered_for_cleanup);
-    assert(trigger->is_present == false);
+    if (self->staged_payload_ptr == NULL) {
+      LF_ERR(FED, "FedOutConn %p invariant broken: staged payload pointer is NULL during cleanup", trigger);
+      validate(false);
+    }
+    if (!trigger->is_registered_for_cleanup) {
+      LF_ERR(FED, "FedOutConn %p invariant broken: not registered for cleanup", trigger);
+      validate(false);
+    }
+    if (trigger->is_present) {
+      LF_ERR(FED, "FedOutConn %p invariant broken: trigger is unexpectedly present during cleanup", trigger);
+      validate(false);
+    }
 
     self->bundle->send_msg.which_message = FederateMessage_tagged_message_tag;
 
@@ -56,7 +65,10 @@ void FederatedOutputConnection_cleanup(Trigger* trigger) {
     tagged_msg->tag.time = sched->current_tag(sched).time;
     tagged_msg->tag.microstep = sched->current_tag(sched).microstep;
 
-    assert(self->bundle->serialize_hooks[self->conn_id]);
+    if (!self->bundle->serialize_hooks[self->conn_id]) {
+      LF_ERR(FED, "FedOutConn %p missing serialize hook for conn_id=%d", trigger, self->conn_id);
+      validate(false);
+    }
     int msg_size = (*self->bundle->serialize_hooks[self->conn_id])(
         self->staged_payload_ptr, self->payload_pool.payload_size, tagged_msg->payload.bytes);
     if (msg_size < 0) {
@@ -96,20 +108,41 @@ void FederatedOutputConnection_ctor(FederatedOutputConnection* self, Reactor* pa
 
 // Called by Scheduler if an event for this Trigger is popped of event queue
 void FederatedInputConnection_prepare(Trigger* trigger, Event* event) {
-  (void)event;
   LF_DEBUG(FED, "Preparing federated input connection %p for triggering", trigger);
   FederatedInputConnection* self = (FederatedInputConnection*)trigger;
+  if (event == NULL) {
+    LF_ERR(FED, "FederatedInputConnection %p prepare called with NULL event", trigger);
+    validate(false);
+  }
+  if (event->super.payload == NULL) {
+    LF_ERR(FED, "FederatedInputConnection %p prepare called with NULL payload at tag " PRINTF_TAG, trigger,
+           event->super.tag);
+    validate(false);
+  }
   Environment* env = trigger->parent->env;
   Scheduler* sched = env->scheduler;
   EventPayloadPool* pool = trigger->payload_pool;
   trigger->is_present = true;
   sched->register_for_cleanup(sched, trigger);
 
-  assert(self->super.downstreams_size == 1);
+  if (self->super.downstreams_size != 1) {
+    LF_ERR(FED, "FederatedInputConnection %p expected exactly 1 downstream, got %zu", trigger,
+           self->super.downstreams_size);
+    validate(false);
+  }
   Port* down = self->super.downstreams[0];
+  if (down == NULL) {
+    LF_ERR(FED, "FederatedInputConnection %p has NULL downstream pointer", trigger);
+    validate(false);
+  }
 
   if (down->effects.size > 0 || down->observers.size > 0) {
-    validate(pool->payload_size == down->value_size);
+    if (pool->payload_size != down->value_size) {
+      LF_ERR(FED,
+             "FederatedInputConnection %p payload size mismatch: pool payload_size=%zu downstream value_size=%zu",
+             trigger, pool->payload_size, down->value_size);
+      validate(false);
+    }
     memcpy(down->value_ptr, event->super.payload, pool->payload_size); // NOLINT
     LF_INFO(FED, "FederatedInputConnection %p preparing downstream port %p for tag: " PRINTF_TAG, trigger,
             event->super.tag);
@@ -118,23 +151,54 @@ void FederatedInputConnection_prepare(Trigger* trigger, Event* event) {
       memcpy(&payload_int, event->super.payload, sizeof(int));
       LF_INFO(FED, "  payload first int = %d", payload_int);
     }
-    down->super.prepare(&down->super, event);
+    // Prepare a port at most once per tag (last-write-wins semantics for repeated writes).
+    // Otherwise, if we would prepare a port multiple times for the same tag, we would
+    // break assumptions about the port preparation logic and potentially cause crashes.
+    // Issues regarding this were observed on Zephyr using multiport input connections,
+    // but it remains unclear if this "fix" is actually needed.
+    //
+    // TODO: Not a clean fix, might have implications like dropped incoming messages.
+    // This issue is probably related to 2ea859a (similar issue?) and 2ea859a could address
+    // a potential fix.
+    if (!down->super.is_present) {
+      down->super.prepare(&down->super, event);
+      down->intended_tag = event->intended_tag;
+    } else {
+      LF_WARN(FED,
+              "Downstream port %p of federated input connection %p was already present.",
+              down, trigger);
+    }
   }
 
   for (size_t i = 0; i < down->conns_out_registered; i++) {
+    if (down->conns_out[i] == NULL) {
+      LF_ERR(FED, "Downstream port %p has NULL conns_out entry at index %zu (registered=%zu)", down, i,
+             down->conns_out_registered);
+      validate(false);
+    }
     LF_DEBUG(CONN, "Found further downstream connection %p to recurse down", down->conns_out[i]);
     down->conns_out[i]->trigger_downstreams(down->conns_out[i], event->intended_tag, event->super.payload,
                                             pool->payload_size);
   }
 
-  pool->free(pool, event->super.payload);
+  lf_ret_t free_ret = pool->free(pool, event->super.payload);
+  if (free_ret != LF_OK) {
+    LF_ERR(FED, "FederatedInputConnection %p failed to free event payload after prepare (ret=%d)", trigger, free_ret);
+    validate(false);
+  }
 }
 
 // Called at the end of a logical tag if it was registered for cleanup.
 void FederatedInputConnection_cleanup(Trigger* trigger) {
   LF_DEBUG(FED, "Cleaning up federated input connection %p", trigger);
-  assert(trigger->is_registered_for_cleanup);
-  assert(trigger->is_present);
+  if (!trigger->is_registered_for_cleanup) {
+    LF_ERR(FED, "FederatedInputConnection %p cleanup invariant broken: not registered for cleanup", trigger);
+    validate(false);
+  }
+  if (!trigger->is_present) {
+    LF_ERR(FED, "FederatedInputConnection %p cleanup invariant broken: trigger not present", trigger);
+    validate(false);
+  }
   trigger->is_present = false;
 }
 
@@ -157,7 +221,11 @@ void FederatedConnectionBundle_handle_tagged_msg(FederatedConnectionBundle* self
   const TaggedMessage* msg = &_msg->message.tagged_message;
   LF_DEBUG(FED, "Callback on FedConnBundle %p for message of size=%u with tag:" PRINTF_TAG, self, msg->payload.size,
            msg->tag);
-  assert(((size_t)msg->conn_id) < self->inputs_size);
+  if (msg->conn_id < 0 || ((size_t)msg->conn_id) >= self->inputs_size) {
+    LF_ERR(FED, "Tagged message has invalid conn_id=%d for bundle %p (inputs_size=%zu). Dropping", msg->conn_id,
+           self, self->inputs_size);
+    return;
+  }
   lf_ret_t ret;
   FederatedInputConnection* input = self->inputs[msg->conn_id];
   Environment* env = self->parent->env;

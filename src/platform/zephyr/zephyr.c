@@ -10,14 +10,54 @@
 
 static PlatformZephyr platform;
 
+static const char* PlatformZephyr_fatal_reason_str(unsigned int reason) {
+  switch (reason) {
+  case K_ERR_CPU_EXCEPTION:
+    return "K_ERR_CPU_EXCEPTION";
+  case K_ERR_SPURIOUS_IRQ:
+    return "K_ERR_SPURIOUS_IRQ";
+  case K_ERR_STACK_CHK_FAIL:
+    return "K_ERR_STACK_CHK_FAIL";
+  case K_ERR_KERNEL_OOPS:
+    return "K_ERR_KERNEL_OOPS";
+  case K_ERR_KERNEL_PANIC:
+    return "K_ERR_KERNEL_PANIC";
+  case 25:
+    // ARM-specific arch reason: K_ERR_ARM_BUS_PRECISE_DATA_BUS.
+    return "K_ERR_ARM_BUS_PRECISE_DATA_BUS";
+  default:
+    if (reason >= K_ERR_ARCH_START) {
+      return "K_ERR_ARCH_SPECIFIC";
+    }
+    return "K_ERR_UNKNOWN";
+  }
+}
+
 void Platform_vprintf(const char* fmt, va_list args) { vprintk(fmt, args); }
 
 // Catch kernel panics from Zephyr
 void k_sys_fatal_error_handler(unsigned int reason, const struct arch_esf* esf) {
-  (void)esf;
-  LF_ERR(PLATFORM, "Zephyr kernel panic reason=%d", reason);
-  char reason_msg[64];
-  snprintf(reason_msg, sizeof(reason_msg), "Zephyr kernel panic reason=%u", reason);
+  const char* reason_str = PlatformZephyr_fatal_reason_str(reason);
+  k_tid_t tid = k_current_get();
+  const char* thread_name = "<unnamed>";
+#if defined(CONFIG_THREAD_NAME)
+  const char* maybe_name = k_thread_name_get((struct k_thread*)tid);
+  if (maybe_name != NULL) {
+    thread_name = maybe_name;
+  }
+#endif
+
+  LF_ERR(PLATFORM,
+         "Zephyr kernel panic reason=%u (%s) thread=%p name=%s isr=%d esf=%p",
+         reason,
+         reason_str,
+         tid,
+         thread_name,
+         (int)k_is_in_isr(),
+         esf);
+
+  char reason_msg[128];
+  snprintf(reason_msg, sizeof(reason_msg), "Zephyr kernel panic reason=%u (%s)", reason, reason_str);
   throw(reason_msg);
 }
 

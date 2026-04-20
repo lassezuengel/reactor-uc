@@ -693,10 +693,10 @@ static int _RUdpIpChannel_retransmit_outgoing_packet(RUdpIpChannel* self, int bu
     RUDP_IP_CHANNEL_STAT("Retransmitting packet uid=%d after %d ms due to timeout (retry %d/%d)", uid, (int)elapsed_ms,
                          retry_attempt, RUDP_MAX_RETRIES);
   } else {
-    RUDP_IP_CHANNEL_DEBUG("Retransmitting packet uid=%d after %d ms due to HACK request (retry %d/%d)", uid,
-                          (int)elapsed_ms, retry_attempt, RUDP_MAX_RETRIES);
-    RUDP_IP_CHANNEL_STAT("Retransmitting packet uid=%d after %d ms due to HACK request (retry %d/%d)", uid,
-                         (int)elapsed_ms, retry_attempt, RUDP_MAX_RETRIES);
+    RUDP_IP_CHANNEL_DEBUG("Retransmitting packet uid=%d after %d ms due to HACK request (requester uid=%d, retry %d/%d)", uid,
+                          (int)elapsed_ms, hack_request_uid, retry_attempt, RUDP_MAX_RETRIES);
+    RUDP_IP_CHANNEL_STAT("Retransmitting packet uid=%d after %d ms due to HACK request (requester uid=%d, retry %d/%d)", uid,
+                         (int)elapsed_ms, hack_request_uid, retry_attempt, RUDP_MAX_RETRIES);
   }
 
   int send_ret = _RUdpIpChannel_send_outgoing_packet(self, buffer_idx);

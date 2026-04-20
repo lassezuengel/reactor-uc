@@ -48,7 +48,12 @@ static void Scheduler_pop_system_events_and_handle(Scheduler* untyped_self, tag_
     validate(system_event->super.type == SYSTEM_EVENT);
     LF_DEBUG(SCHED, "Popped system event %p with tag" PRINTF_TAG "next tag" PRINTF_TAG, system_event,
              system_event->super.tag, next_tag);
-    assert(lf_tag_compare(system_event->super.tag, next_tag) == 0);
+    if (lf_tag_compare(system_event->super.tag, next_tag) != 0) {
+      LF_ERR(SCHED,
+             "System event tag mismatch: popped tag=" PRINTF_TAG " expected next_tag=" PRINTF_TAG,
+             system_event->super.tag, next_tag);
+      validate(false);
+    }
     LF_DEBUG(SCHED, "Handling system event %p for tag " PRINTF_TAG, system_event, system_event->super.tag);
 
     system_event->handler->handle(system_event->handler, system_event);
@@ -79,7 +84,11 @@ static void Scheduler_pop_events_and_prepare(Scheduler* untyped_self, tag_t next
     validate(ret == LF_OK);
 
     validate(event->super.type == EVENT);
-    assert(lf_tag_compare(event->super.tag, next_tag) == 0);
+    if (lf_tag_compare(event->super.tag, next_tag) != 0) {
+      LF_ERR(SCHED, "Event tag mismatch: popped tag=" PRINTF_TAG " expected next_tag=" PRINTF_TAG,
+             event->super.tag, next_tag);
+      validate(false);
+    }
     LF_DEBUG(SCHED, "Handling event %p for tag " PRINTF_TAG, event, event->super.tag);
 
     Trigger* trigger = event->trigger;
@@ -101,7 +110,10 @@ void Scheduler_register_for_cleanup(Scheduler* untyped_self, Trigger* trigger) {
   }
 
   if (self->cleanup_ll_head == NULL) {
-    assert(self->cleanup_ll_tail == NULL);
+    if (self->cleanup_ll_tail != NULL) {
+      LF_ERR(SCHED, "Cleanup list invariant broken: head is NULL but tail=%p", self->cleanup_ll_tail);
+      validate(false);
+    }
     self->cleanup_ll_head = trigger;
     self->cleanup_ll_tail = trigger;
   } else {
@@ -125,15 +137,31 @@ void Scheduler_prepare_timestep(Scheduler* untyped_self, tag_t tag) {
 void Scheduler_clean_up_timestep(Scheduler* untyped_self) {
   DynamicScheduler* self = (DynamicScheduler*)untyped_self;
 
-  assert(self->reaction_queue->empty(self->reaction_queue));
+  if (!self->reaction_queue->empty(self->reaction_queue)) {
+    LF_ERR(SCHED, "Cleanup invariant broken: reaction queue not empty at tag " PRINTF_TAG, self->current_tag);
+    validate(false);
+  }
 
-  assert(self->cleanup_ll_head && self->cleanup_ll_tail);
+  if (self->cleanup_ll_head == NULL && self->cleanup_ll_tail == NULL) {
+    LF_DEBUG(SCHED, "No triggers registered for cleanup at tag " PRINTF_TAG, self->current_tag);
+    return;
+  }
+
+  if (self->cleanup_ll_head == NULL || self->cleanup_ll_tail == NULL) {
+    LF_ERR(SCHED, "Cleanup list invariant broken: head=%p tail=%p at tag " PRINTF_TAG, self->cleanup_ll_head,
+           self->cleanup_ll_tail, self->current_tag);
+    validate(false);
+  }
   LF_DEBUG(SCHED, "Cleaning up timestep for tag " PRINTF_TAG, self->current_tag);
   Trigger* cleanup_trigger = self->cleanup_ll_head;
 
   while (cleanup_trigger) {
     Trigger* this = cleanup_trigger;
-    assert(!(this->next == NULL && this != self->cleanup_ll_tail));
+    if (this->next == NULL && this != self->cleanup_ll_tail) {
+      LF_ERR(SCHED, "Cleanup list invariant broken: node %p has next=NULL but tail=%p", this,
+             self->cleanup_ll_tail);
+      validate(false);
+    }
     this->cleanup(this);
     this->is_registered_for_cleanup = false;
     cleanup_trigger = this->next;
@@ -433,6 +461,10 @@ lf_ret_t Scheduler_schedule_at(Scheduler* super, Event* event) {
   }
 
   ret = self->event_queue->insert(self->event_queue, (AbstractEvent*)event);
+  if (ret != LF_OK) {
+    LF_ERR(SCHED, "Event queue insert failed for trigger=%p at tag=" PRINTF_TAG " (ret=%d)", event->trigger,
+           event->super.tag, ret);
+  }
   validate(ret == LF_OK);
 
   self->env->platform->notify(self->env->platform);
@@ -448,6 +480,10 @@ lf_ret_t Scheduler_schedule_system_event_at(Scheduler* super, SystemEvent* event
   MUTEX_LOCK(self->mutex);
 
   ret = self->system_event_queue->insert(self->system_event_queue, (AbstractEvent*)event);
+  if (ret != LF_OK) {
+    LF_ERR(SCHED, "System event queue insert failed for handler=%p at tag=" PRINTF_TAG " (ret=%d)", event->handler,
+           event->super.tag, ret);
+  }
   validate(ret == LF_OK);
   MUTEX_UNLOCK(self->mutex);
 

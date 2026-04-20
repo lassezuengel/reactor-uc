@@ -19,11 +19,23 @@ void Port_prepare(Trigger* _self, Event* event) {
   LF_DEBUG(TRIG, "Preparing port %p with %d effects", self, self->effects.size);
   Scheduler* sched = self->super.parent->env->scheduler;
   _self->is_present = true;
-  assert(!_self->is_registered_for_cleanup);
+  if (_self->is_registered_for_cleanup) {
+    LF_ERR(TRIG,
+           "Port_prepare invariant violated for port %p: is_registered_for_cleanup already true "
+           "(type=%d is_present=%d intended_tag=" PRINTF_TAG ")",
+           self, _self->type, _self->is_present, self->intended_tag);
+    validate(false);
+  }
   sched->register_for_cleanup(sched, _self);
 
   for (size_t i = 0; i < self->effects.size; i++) {
-    validaten(sched->add_to_reaction_queue(sched, self->effects.reactions[i]));
+    lf_ret_t add_ret = sched->add_to_reaction_queue(sched, self->effects.reactions[i]);
+    if (add_ret != LF_OK) {
+      LF_ERR(TRIG,
+             "Failed to add reaction %p to queue from port %p at intended_tag=" PRINTF_TAG " (ret=%d)",
+             self->effects.reactions[i], self, self->intended_tag, add_ret);
+    }
+    validaten(add_ret);
   }
 }
 
@@ -44,7 +56,14 @@ void Port_set(Port* self, const void* value) {
 
 void Port_cleanup(Trigger* _self) {
   assert(_self->type == TRIG_INPUT || _self->type == TRIG_OUTPUT);
-  assert(_self->is_registered_for_cleanup);
+  if (!_self->is_registered_for_cleanup) {
+    Port* self = (Port*)_self;
+    LF_ERR(TRIG,
+           "Port_cleanup invariant violated for port %p: is_registered_for_cleanup is false "
+           "(type=%d is_present=%d intended_tag=" PRINTF_TAG ")",
+           self, _self->type, _self->is_present, self->intended_tag);
+    validate(false);
+  }
   LF_DEBUG(TRIG, "Cleaning up port %p", _self);
   _self->is_present = false;
 }
