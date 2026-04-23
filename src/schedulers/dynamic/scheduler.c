@@ -194,14 +194,14 @@ static bool _Scheduler_check_and_handle_stp_violations(DynamicScheduler* self, R
 
       for (size_t j = 0; j < port->effects.size; j++) {
         if (port->effects.reactions[j] == reaction) {
-          LF_WARN(SCHED, "Timeout detected for %s->reaction_%d", reaction->parent->name, reaction->index);
+          LF_INFO(SCHED, "Invoking STP violation handler for %s->reaction_%d", reaction->parent->name, reaction->index);
           reaction->stp_violation_handler(reaction);
           return true;
         }
       }
       for (size_t j = 0; j < port->observers.size; j++) {
         if (port->observers.reactions[j] == reaction) {
-          LF_WARN(SCHED, "Timeout detected for %s->reaction_%d", reaction->parent->name, reaction->index);
+          LF_INFO(SCHED, "Invoking STP violation handler for %s->reaction_%d", reaction->parent->name, reaction->index);
           reaction->stp_violation_handler(reaction);
           return true;
         }

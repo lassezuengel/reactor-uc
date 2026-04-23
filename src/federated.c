@@ -304,9 +304,30 @@ void FederatedConnectionBundle_handle_tagged_msg(FederatedConnectionBundle* self
         LF_INFO(FED, "Safe-to-process violation! Tried scheduling event to a past tag. Handling now instead!");
         event.super.tag = sched->current_tag(sched);
         event.super.tag.microstep++;
+
+        // TODO: Is this enough to ensure that the updated tag is indeed in the future?
+        //
+        // In some instances, updating the event tag to current_tag + 1 microstep
+        // might be insufficient. If multiple tardy inputs are received on the same connection,
+        // they would all be scheduled at the same tag.
+        // To address this, we check if the updated tag is indeed greater than the last known
+        // tag for this input connection.
+        if (lf_tag_compare(event.super.tag, input->last_known_tag) <= 0) {
+          // If not, we update the tag to be last_known_tag + 1 microstep.
+          //
+          // This should hopefully fix the issues caused by preparing ports multiple times
+          // in `FederatedInputConnection_prepare`, and the corresponding warning should
+          // not be triggered anymore after this fix.
+          event.super.tag = lf_delay_tag(input->last_known_tag, 0);
+        }
+
         status = sched->schedule_at(sched, &event);
         LF_INFO(FED, "Second schedule_at (current_tag+ms) returned %d for tag: " PRINTF_TAG, status, event.super.tag);
         if (status == LF_OK) {
+          tag = event.super.tag;
+          if (lf_tag_compare(input->last_known_tag, event.super.tag) < 0) {
+            input->last_known_tag = event.super.tag;
+          }
           event_scheduled = true;
         } else {
           LF_ERR(FED, "Failed to schedule event at current tag also. Dropping");
