@@ -232,6 +232,7 @@ class UcMainGeneratorFederated(
         val ipv6Addr = if (needsConnectionManager) getIpv6Address() else null
         val connectionManagerBlock =
             if (needsConnectionManager) {
+              val connMgrAddrArg = if (ipv6Addr != null) "\"$ipv6Addr\"" else "NULL"
               val ipv6Setup = if (ipv6Addr != null) {
                 """
             |    int lf_ipv6_set_ret = lf_set_ipv6_address("$ipv6Addr");
@@ -246,7 +247,7 @@ class UcMainGeneratorFederated(
               """
             |#if defined(PLATFORM_ZEPHYR)
             |    printf("Waiting for network connection....\n");
-            |    lf_init_connection_manager();
+            |    lf_init_connection_manager($connMgrAddrArg);
             |    lf_wait_for_network_connection();
             |    printf("Setting up IPv6 address for SICSLOWPAN...\n");
             $ipv6Setup
@@ -259,6 +260,7 @@ class UcMainGeneratorFederated(
             }
         """
             |#include "reactor-uc/reactor-uc.h"
+          |#include "reactor-uc/platform/zephyr/connection_manager.h"
         ${" |"..generateIncludeScheduler()}
             |#include "lf_federate.h"
             |static ${currentFederate.codeType} main_reactor;
