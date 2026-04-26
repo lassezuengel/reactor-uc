@@ -234,6 +234,7 @@ class UcPlatformArtifactGeneratorZephyr(
         .property("NET_L2_IEEE802154", "y")
         .property("NET_L2_IEEE802154_SHELL", "n")
         .property("IEEE802154_NET_IF_NO_AUTO_START", "y")
+        .property("NET_IPV6_DAD", "n")
         .property("NET_IPV6_ND", "y")
         .property("NET_IPV6_NBR_CACHE", "y")
         .property("NET_CONFIG_IEEE802154_CHANNEL", "26")

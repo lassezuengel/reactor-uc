@@ -162,6 +162,7 @@ static int _RUdpIpChannel_fill_sockaddr(const char* host, unsigned short port, i
     struct sockaddr_in6* addr6 = (struct sockaddr_in6*)storage;
     addr6->sin6_family = AF_INET6;
     addr6->sin6_port = htons(port);
+    addr6->sin6_scope_id = net_if_get_by_iface(net_if_get_default());
     if (inet_pton(AF_INET6, host, &addr6->sin6_addr) <= 0) {
       RUDP_IP_CHANNEL_ERR("Invalid IPv6 address %s", host);
       return NETWORK_CHANNEL_RET_ERROR;
@@ -261,6 +262,19 @@ static int _RUdpIpChannel_connect(RUdpIpChannel* self) {
 #else
   RUDP_IP_CHANNEL_WARN("SO_RCVTIMEO unsupported or disabled, recv will block until data arrives");
 #endif
+
+  RUDP_IP_CHANNEL_ERR("PRINTING NETWORK INTERFACE CONFIGURATION FOR DEBUGGING:\n");
+  struct net_if *iface = net_if_get_default();
+  struct net_if_ipv6 *ipv6_cfg = iface->config.ip.ipv6;
+  if (ipv6_cfg) {
+      for (int i = 0; i < NET_IF_MAX_IPV6_ADDR; i++) {
+          if (ipv6_cfg->unicast[i].is_used) {
+              char buf[NET_IPV6_ADDR_LEN];
+              net_addr_ntop(AF_INET6, &ipv6_cfg->unicast[i].address.in6_addr, buf, sizeof(buf));
+              RUDP_IP_CHANNEL_ERR("iface addr[%d]=%s state=%d\n", i, buf, ipv6_cfg->unicast[i].addr_state);
+          }
+      }
+  }
 
   if (bind(self->fd, (struct sockaddr*)&local_addr, local_addrlen) < 0) {
     RUDP_IP_CHANNEL_ERR("Failed to bind RUDP socket to %s:%u errno=%d", self->local_host, self->local_port, errno);

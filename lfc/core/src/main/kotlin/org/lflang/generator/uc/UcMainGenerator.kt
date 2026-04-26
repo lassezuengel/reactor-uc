@@ -15,6 +15,8 @@ import org.lflang.target.property.TimeOutProperty
 import org.lflang.target.property.type.FedNetInterfaceType.FedNetInterface
 import org.lflang.target.property.type.PlatformType.Platform
 import org.lflang.toUnixString
+import java.net.InetAddress
+import java.net.Inet6Address
 
 abstract class UcMainGenerator(
     val targetConfig: TargetConfig,
@@ -221,6 +223,21 @@ class UcMainGeneratorFederated(
         .firstOrNull()
   }
 
+  // takes the last segment of the IPv6 address as int
+  private fun uid(ipv6Addr: String): Int {
+      println("Deriving UID from IPv6 address: $ipv6Addr")
+
+      // Find the last colon, then take everything after it
+      val lastSegment = ipv6Addr.substringAfterLast(":")
+
+      // Handle cases where last segment might have trailing characters
+      val cleanSegment = lastSegment.takeWhile { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' }
+
+      val result = cleanSegment.toIntOrNull(16) ?: 0
+      println("Derived UID: $result")
+      return result
+  }
+
   override fun generateInitializeScheduler() =
       "DynamicScheduler_ctor(&_scheduler, _lf_environment, &${eventQueueName}.super, &${systemEventQueueName}.super, &${reactionQueueName}.super, ${getDuration()}, ${keepAlive()});"
 
@@ -233,6 +250,7 @@ class UcMainGeneratorFederated(
         val connectionManagerBlock =
             if (needsConnectionManager) {
               val connMgrAddrArg = if (ipv6Addr != null) "\"$ipv6Addr\"" else "NULL"
+              val uiddd = uid(connMgrAddrArg)
               val ipv6Setup = if (ipv6Addr != null) {
                 """
             |    int lf_ipv6_set_ret = lf_set_ipv6_address("$ipv6Addr");
@@ -247,10 +265,9 @@ class UcMainGeneratorFederated(
               """
             |#if defined(PLATFORM_ZEPHYR)
             |    printf("Waiting for network connection....\n");
-            |    lf_init_connection_manager($connMgrAddrArg);
+            |    lf_init_connection_manager($uiddd);
             |    lf_wait_for_network_connection();
             |    printf("Setting up IPv6 address for SICSLOWPAN...\n");
-            $ipv6Setup
             |    printf("Network ready, continuing.\n");
             |#endif
             |

@@ -27,7 +27,7 @@
  *
  * @param ipv6_addr Compile-time IPv6 address used to derive EUI-64, or NULL.
  */
-void lf_init_connection_manager(const char* ipv6_addr);
+void lf_init_connection_manager(int federate_id);
 
 /**
  * @brief Block until a local network connection is available.
@@ -37,6 +37,9 @@ void lf_init_connection_manager(const char* ipv6_addr);
  * connection manager.
  */
 void lf_wait_for_network_connection(void);
+
+
+const char *lf_get_link_local_addr(void);
 
 /**
  * @brief Set the IPv6 address for the default network interface.
@@ -49,7 +52,7 @@ void lf_wait_for_network_connection(void);
  * @param ipv6_addr The IPv6 address string to set
  * @return 0 on success, negative error code on failure
  */
-int lf_set_ipv6_address(const char* ipv6_addr);
+// int lf_set_ipv6_address(const char* ipv6_addr);
 #endif // PLATFORM_ZEPHYR
 
 #endif
