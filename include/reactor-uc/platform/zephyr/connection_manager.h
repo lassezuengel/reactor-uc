@@ -39,7 +39,7 @@ void lf_wait_for_network_connection(void);
  *
  * Call this after lf_wait_for_network_connection() to configure the
  * IPv6 address. The address string should be in standard IPv6 notation
- * (e.g., "fd01::1").
+ * (e.g., "fe80::1").
  *
  * @param ipv6_addr The IPv6 address string to set
  * @return 0 on success, negative error code on failure

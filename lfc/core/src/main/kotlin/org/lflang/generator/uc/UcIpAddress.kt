@@ -106,7 +106,7 @@ class IpPortManager {
 }
 
 object IpAddressManager {
-  private val defaultIpv6Start = IPAddress.fromString("fd01::1")
+  private val defaultIpv6Start = IPAddress.fromString("fe80::1")
   private val usedIps = mutableSetOf<IPAddress>()
   private val portManagers = mutableMapOf<IPAddress, IpPortManager>()
   private var nextIpv6Address = defaultIpv6Start
