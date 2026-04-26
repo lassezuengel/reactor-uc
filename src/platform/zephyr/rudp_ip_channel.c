@@ -484,13 +484,13 @@ static void _RUdpIpChannel_dispatch_received_packet(RUdpIpChannel* self, int pac
   }
 
   case RUDP_PACKET_TYPE_DATA: {
-    int payload_length = (int)bytes_received - 9;
+    int payload_length = (int)bytes_received - 5;
     if (payload_length < 0) {
       RUDP_IP_CHANNEL_WARN("Invalid data packet length %d", (int)bytes_received);
       return;
     }
 
-    _RUdpIpChannel_handle_received_data(self, uid, self->read_buffer + 9, payload_length);
+    _RUdpIpChannel_handle_received_data(self, uid, self->read_buffer + 5, payload_length);
     return;
   }
 
@@ -503,8 +503,7 @@ static void _RUdpIpChannel_dispatch_received_packet(RUdpIpChannel* self, int pac
 /**
  * Packets sent over the RUDP channel have the following format:
  * [1 byte:  type and flags]
- * [4 bytes: UID][payload]
- * [4 bytes: size of payload, in bytes]
+ * [4 bytes: UID]
  * [payload]
  *
  */
@@ -609,6 +608,7 @@ static int _RUdpIpChannel_send_outgoing_packet(RUdpIpChannel* self, int buffer_i
 
   if (packets_sent++ % 100 == 0) {
     RUDP_IP_CHANNEL_STAT("%d packets sent, %d retransmissions", packets_sent, packets_retransmitted);
+    RUDP_IP_CHANNEL_ERR("%d packets sent, %d retransmissions", packets_sent, packets_retransmitted);
   }
 
   if (bytes_sent < 0) {
@@ -964,6 +964,7 @@ static void _RUdpIpChannel_handle_received_data(RUdpIpChannel* self, int uid, co
 
   if (packets_received++ % 100 == 0) {
     RUDP_IP_CHANNEL_STAT("%u packets received, %u duplicates", packets_received, packets_received_duplicates);
+    RUDP_IP_CHANNEL_ERR("%u packets received, %u duplicates", packets_received, packets_received_duplicates);
   }
 
   RUDP_IP_CHANNEL_DEBUG("Received data packet uid=%d, payload_length=%d, next_expected=%d", uid, payload_length,
@@ -1120,13 +1121,12 @@ static lf_ret_t RUdpIpChannel_send_blocking(NetworkChannel* untyped_self, const 
 
   RUdpOutgoingPacket* pkt = &self->outgoing_buffer[slot];
 
-  /* Serialize packet: [type][uid:4][length:4][payload] */
+  /* Serialize packet: [type][uid:4][payload] */
   pkt->packet_data[0] = RUDP_PACKET_TYPE_DATA;
   _RUdpIpChannel_write_i32_unaligned(pkt->packet_data + 1, self->next_uid);
-  _RUdpIpChannel_write_i32_unaligned(pkt->packet_data + 5, data_length);
-  memcpy(pkt->packet_data + 9, self->write_buffer, (size_t)data_length);
+  memcpy(pkt->packet_data + 5, self->write_buffer, (size_t)data_length);
 
-  pkt->packet_length = 9 + data_length;
+  pkt->packet_length = 5 + data_length;
   pkt->uid = self->next_uid;
   pkt->is_acked = false;
   pkt->retry_count = 0;

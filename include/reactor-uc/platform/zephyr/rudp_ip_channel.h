@@ -58,7 +58,7 @@ typedef struct FederatedConnectionBundle FederatedConnectionBundle;
  * Outgoing packet buffer entry: tracks packets sent but not yet acknowledged.
  */
 typedef struct {
-  unsigned char packet_data[9 + RUDP_IP_CHANNEL_BUFFER_SIZE];
+  unsigned char packet_data[5 + RUDP_IP_CHANNEL_BUFFER_SIZE];
   int packet_length;
   int uid;
   bool is_acked;
