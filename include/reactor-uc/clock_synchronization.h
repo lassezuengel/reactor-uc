@@ -10,6 +10,7 @@
 #define CLOCK_SYNC_DEFAULT_KP 0.7            // Default value from linuxptp
 #define CLOCK_SYNC_DEFAULT_KI 0.3            // Default value from linuxptp
 #define CLOCK_SYNC_DEFAULT_MAX_ADJ 200000000 // This is the default max-ppb value for linuxptp
+#define CLOCK_SYNC_STATS_REPORT_EVERY_N 10    // Print aggregated clock-sync stats once every N samples.
 #define CLOCK_SYNC_INITAL_STEP_THRESHOLD MSEC(100)
 
 typedef struct ClockSynchronization ClockSynchronization;
@@ -54,6 +55,11 @@ struct ClockSynchronization {
   int sequence_number;            // The sequence number of the last sent sync request message (if slave).
   interval_t period;              // The period between sync request messages are sent to the neighbor master.
   ClockSyncTimestamps timestamps; // The timestamps used to compute clock offset.
+  size_t stats_sample_count;      // Number of sync samples accumulated for the next report.
+  interval_t stats_rtt_sum;       // Sum of RTT samples in the current report window.
+  interval_t stats_offset_sum;    // Sum of clock offset samples in the current report window.
+  interval_t stats_rtt_abs_max;   // Largest absolute RTT sample in the current report window.
+  interval_t stats_offset_abs_max;// Largest absolute clock offset sample in the current report window.
   ClockServo servo;               // The PID controller
   void (*handle_message_callback)(ClockSynchronization* self, const ClockSyncMessage* msg, size_t bundle_idx);
 };

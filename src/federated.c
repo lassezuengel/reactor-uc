@@ -319,6 +319,9 @@ void FederatedConnectionBundle_handle_tagged_msg(FederatedConnectionBundle* self
           // in `FederatedInputConnection_prepare`, and the corresponding warning should
           // not be triggered anymore after this fix.
           event.super.tag = lf_delay_tag(input->last_known_tag, 0);
+
+          // Might cause ill side-effects, so we better log this case;
+          LF_WARN(FED, "Updated event tag after safe-to-process violation was still not in the future.");
         }
 
         status = sched->schedule_at(sched, &event);
