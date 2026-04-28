@@ -9,6 +9,8 @@
 #define NEIGHBOR_INDEX_SELF -1
 #define NEIGHBOR_INDEX_UNKNOWN -2
 #define NUM_RESERVED_EVENTS 2 // There is 1 periodic event, but it is rescheduled before it is freed so we need 2.
+#define CLOCK_SYNC_OUTLIER_RTT_MIN_THRESHOLD MSEC(15)
+#define CLOCK_SYNC_OUTLIER_RTT_MULTIPLIER 4
 
 static interval_t ClockSynchronization_abs_interval(interval_t value) {
   return value < 0 ? -value : value;
@@ -20,6 +22,29 @@ static void ClockSynchronization_reset_report_stats(ClockSynchronization* self) 
   self->stats_offset_sum = 0;
   self->stats_rtt_abs_max = 0;
   self->stats_offset_abs_max = 0;
+}
+
+static bool ClockSynchronization_is_rtt_outlier(ClockSynchronization* self, interval_t rtt_abs,
+                                                interval_t* threshold_out, interval_t* average_rtt_out) {
+  interval_t threshold = CLOCK_SYNC_OUTLIER_RTT_MIN_THRESHOLD;
+  interval_t average_rtt = 0;
+
+  if (self->stats_sample_count > 0) {
+    average_rtt = self->stats_rtt_sum / (interval_t)self->stats_sample_count;
+    interval_t relative_threshold = average_rtt * CLOCK_SYNC_OUTLIER_RTT_MULTIPLIER;
+    if (relative_threshold > threshold) {
+      threshold = relative_threshold;
+    }
+  }
+
+  if (threshold_out != NULL) {
+    *threshold_out = threshold;
+  }
+  if (average_rtt_out != NULL) {
+    *average_rtt_out = average_rtt;
+  }
+
+  return rtt_abs > threshold;
 }
 
 static NetworkChannel* ClockSynchronization_get_channel(FederatedConnectionBundle* bundle, int message_type) {
@@ -42,12 +67,23 @@ static void ClockSynchronization_correct_clock(ClockSynchronization* self, Clock
   interval_t owd = rtt / 2;
   interval_t clock_offset = owd - (timestamps->t2 - timestamps->t1);
   FederatedEnvironment* env_fed = (FederatedEnvironment*)self->env;
+  interval_t rtt_abs = ClockSynchronization_abs_interval(rtt);
+  interval_t rtt_threshold = 0;
+  interval_t average_rtt = 0;
+
+  if (ClockSynchronization_is_rtt_outlier(self, rtt_abs, &rtt_threshold, &average_rtt)) {
+    LF_WARN(CLOCK_SYNC,
+            "Discarding clock sync sample with RTT=" PRINTF_TIME " (threshold=" PRINTF_TIME ", average=" PRINTF_TIME ") resetting accumulated error",
+            rtt_abs, rtt_threshold, average_rtt);
+    self->servo.accumulated_error = 0;
+    self->servo.last_error = 0;
+    return;
+  }
 
   self->stats_sample_count++;
   self->stats_rtt_sum += rtt;
   self->stats_offset_sum += clock_offset;
 
-  interval_t rtt_abs = ClockSynchronization_abs_interval(rtt);
   interval_t clock_offset_abs = ClockSynchronization_abs_interval(clock_offset);
   if (rtt_abs > self->stats_rtt_abs_max) {
     self->stats_rtt_abs_max = rtt_abs;
