@@ -124,6 +124,50 @@ static bool _RUdpIpChannel_is_retryable_send_errno(int err) {
   }
 }
 
+static int _RUdpIpChannel_compute_recv_timeout_ms_locked(RUdpIpChannel* self, int64_t now) {
+  int timeout_ms = RUDP_RETRANSMIT_TIMEOUT_MS;
+
+  for (int i = 0; i < RUDP_OUTGOING_BUFFER_SIZE; i++) {
+    RUdpOutgoingPacket* pkt = &self->outgoing_buffer[i];
+    if (pkt->is_acked || pkt->uid < 0) {
+      continue;
+    }
+
+    int64_t elapsed_ms = now - pkt->last_send_time_ms;
+    int64_t remaining_ms = (int64_t)pkt->retransmit_delay_ms - 4 /* clock granularity compensation */ - elapsed_ms;
+    if (remaining_ms <= 1) {
+      return 1;
+    }
+
+    if (remaining_ms < timeout_ms) {
+      timeout_ms = (int)remaining_ms;
+    }
+  }
+
+  return timeout_ms;
+}
+
+static bool _RUdpIpChannel_set_socket_recv_timeout_ms(RUdpIpChannel* self, int timeout_ms, bool log_on_failure) {
+#if defined(CONFIG_NET_CONTEXT_RCVTIMEO) && (CONFIG_NET_CONTEXT_RCVTIMEO == 1)
+  struct timeval recv_timeout = {
+      .tv_sec = timeout_ms / 1000,
+      .tv_usec = (timeout_ms % 1000) * 1000,
+  };
+  if (setsockopt(self->fd, SOL_SOCKET, SO_RCVTIMEO, &recv_timeout, sizeof(recv_timeout)) < 0) {
+    if (log_on_failure) {
+      RUDP_IP_CHANNEL_WARN("Failed to set socket recv timeout to %d ms errno=%d", timeout_ms, errno);
+    }
+    return false;
+  }
+  return true;
+#else
+  (void)self;
+  (void)timeout_ms;
+  (void)log_on_failure;
+  return false;
+#endif
+}
+
 /**
  * Reads a 32-bit integer from an unaligned memory location.
  * @param p Pointer to the memory location.
@@ -250,17 +294,9 @@ static int _RUdpIpChannel_connect(RUdpIpChannel* self) {
   /* Set recv timeout equal to the retransmit timeout so the worker wakes up to check
    * retransmissions even when no packet arrives. The scheduler puts the thread to sleep
    * properly inside recv — no busy-wait or k_msleep needed. */
-#if defined(CONFIG_NET_CONTEXT_RCVTIMEO) && (CONFIG_NET_CONTEXT_RCVTIMEO == 1)
-  struct timeval recv_timeout = {
-      .tv_sec = RUDP_RETRANSMIT_TIMEOUT_MS / 1000,
-      .tv_usec = (RUDP_RETRANSMIT_TIMEOUT_MS % 1000) * 1000,
-  };
-  if (setsockopt(self->fd, SOL_SOCKET, SO_RCVTIMEO, &recv_timeout, sizeof(recv_timeout)) < 0) {
-    RUDP_IP_CHANNEL_WARN("Failed to set socket recv timeout errno=%d", errno);
+  if (!_RUdpIpChannel_set_socket_recv_timeout_ms(self, RUDP_RETRANSMIT_TIMEOUT_MS, true)) {
+    RUDP_IP_CHANNEL_WARN("SO_RCVTIMEO unsupported or disabled, recv will block until data arrives");
   }
-#else
-  RUDP_IP_CHANNEL_WARN("SO_RCVTIMEO unsupported or disabled, recv will block until data arrives");
-#endif
 
   if (bind(self->fd, (struct sockaddr*)&local_addr, local_addrlen) < 0) {
     RUDP_IP_CHANNEL_ERR("Failed to bind RUDP socket to %s:%u errno=%d", self->local_host, self->local_port, errno);
@@ -606,7 +642,7 @@ static int _RUdpIpChannel_send_outgoing_packet(RUdpIpChannel* self, int buffer_i
   RUdpOutgoingPacket* pkt = &self->outgoing_buffer[buffer_idx];
   ssize_t bytes_sent = send(self->fd, pkt->packet_data, (size_t)pkt->packet_length, 0);
 
-  if (packets_sent++ % 100 == 0) {
+  if (packets_sent++ % 500 == 0 && packets_sent > 1) {
     RUDP_IP_CHANNEL_STAT("%d packets sent, %d retransmissions", packets_sent, packets_retransmitted);
     RUDP_IP_CHANNEL_ERR("%d packets sent, %d retransmissions", packets_sent, packets_retransmitted);
   }
@@ -747,7 +783,7 @@ static void _RUdpIpChannel_handle_retransmissions(RUdpIpChannel* self) {
     }
 
     int64_t elapsed = now - pkt->last_send_time_ms;
-    if (elapsed >= pkt->retransmit_delay_ms) {
+    if (elapsed >= pkt->retransmit_delay_ms - 4 /* clock granularity compensation */) {
       retransmit_slot = i;
       // Send one packet at a time to avoid bursts of retransmissions;
       // will check others on next invocation
@@ -962,7 +998,7 @@ static void _RUdpIpChannel_handle_received_data(RUdpIpChannel* self, int uid, co
     return;
   }
 
-  if (packets_received++ % 100 == 0) {
+  if (packets_received++ % 500 == 0 && packets_received > 1) {
     RUDP_IP_CHANNEL_STAT("%u packets received, %u duplicates", packets_received, packets_received_duplicates);
     RUDP_IP_CHANNEL_ERR("%u packets received, %u duplicates", packets_received, packets_received_duplicates);
   }
@@ -1254,14 +1290,18 @@ static void _RUdpIpChannel_handle_connection_in_progress(RUdpIpChannel* self) {
 
 static void _RUdpIpChannel_handle_connected(RUdpIpChannel* self) {
   /* Blocking recv: returns immediately on packet arrival, or after SO_RCVTIMEO
-   * (= RUDP_RETRANSMIT_TIMEOUT_MS) when quiet, which triggers retransmission checks.
-   * TODO: Notice that this means that retransmissions happen RUDP_RETRANSMIT_TIMEOUT_MS after the original
-   *       send at the earliest. Worst-case, we wait up to 2*RUDP_RETRANSMIT_TIMEOUT_MS for a retransmission
-   *       because we only check for retransmissions after recv returns. To improve this, we could use a timerfd or
-   *       eventfd to wake up the thread immediately when a retransmission timeout occurs, instead of waiting for the
-   * next recv timeout. For now, we keep it simple with just SO_RCV TIMEO and accept the potential extra delay in
-   * retransmissions.
+   * computed from the earliest outstanding retransmission deadline when quiet, which triggers
+   * retransmission checks close to the deadline instead of waiting for a fixed timeout window.
    */
+  int recv_timeout_ms;
+  k_mutex_lock(&self->mutex, K_FOREVER);
+  recv_timeout_ms = _RUdpIpChannel_compute_recv_timeout_ms_locked(self, k_uptime_get());
+  k_mutex_unlock(&self->mutex);
+
+#if defined(CONFIG_NET_CONTEXT_RCVTIMEO) && (CONFIG_NET_CONTEXT_RCVTIMEO == 1)
+  (void)_RUdpIpChannel_set_socket_recv_timeout_ms(self, recv_timeout_ms, false);
+#endif
+
   ssize_t bytes_received = recv(self->fd, self->read_buffer, sizeof(self->read_buffer), 0);
   if (bytes_received < 0) {
     switch (errno) {

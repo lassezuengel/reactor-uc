@@ -59,7 +59,7 @@ static void ClockSynchronization_correct_clock(ClockSynchronization* self, Clock
   if (self->stats_sample_count >= CLOCK_SYNC_STATS_REPORT_EVERY_N) {
     double sample_count = (double)self->stats_sample_count;
     LF_INFO(CLOCK_SYNC,
-            "Clock sync stats over %zu samples: RTT avg=%.1f ms abs max=%.1f ms offset avg=%.1f ms abs max=%.1f ms",
+            "Stats %zuS: RTT avg=%.1f ms abs max=%.1f ms offset avg=%.1f ms abs max=%.1f ms",
             self->stats_sample_count, ((double)self->stats_rtt_sum) / sample_count / 1e6,
             ((double)self->stats_rtt_abs_max) / 1e6, ((double)self->stats_offset_sum) / sample_count / 1e6,
             ((double)self->stats_offset_abs_max) / 1e6);
