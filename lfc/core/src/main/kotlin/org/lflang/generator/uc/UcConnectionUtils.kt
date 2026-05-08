@@ -2,14 +2,15 @@ package org.lflang.generator.uc
 
 import org.lflang.AttributeUtils
 import org.lflang.TimeValue
-import org.lflang.getWidth
 import org.lflang.generator.orNever
 import org.lflang.generator.uc.UcInstanceGenerator.Companion.codeWidth
 import org.lflang.generator.uc.UcInstanceGenerator.Companion.width
 import org.lflang.generator.uc.UcPortGenerator.Companion.width
+import org.lflang.getWidth
 import org.lflang.lf.Connection
 import org.lflang.lf.Port
 import org.lflang.lf.VarRef
+import org.lflang.target.property.type.PlatformType
 
 /**
  * A UcConnectionChannel is the fundamental lowest-level representation of a connection in a LF
@@ -154,31 +155,156 @@ class UcFederatedConnectionBundle(
 
   fun hasClockSyncNetworkChannel(): Boolean = networkChannel.supportsClockSyncUdpChannel()
 
+  /**
+   * Get the @clock_sync_channel annotation value from the connection. Valid values: "tcp", "rudp",
+   * "udp", "auto", or null if not specified.
+   */
+  private fun getClockSyncChannelAnnotation(): String? {
+    val linkAttr = AttributeUtils.getLinkAttribute(groupedConnections.first().lfConn) ?: return null
+    return linkAttr.getParamString("clock_sync_channel")
+  }
+
+  /** Get the name of the main channel type (tcp, rudp, udp, custom, coap, etc.) */
+  private fun getMainChannelTypeName(): String {
+    return when (networkChannel.type) {
+      NetworkChannelType.TCP_IP -> "tcp"
+      NetworkChannelType.RUDP_IP -> "rudp"
+      NetworkChannelType.COAP_UDP_IP -> "udp"
+      else -> networkChannel.type.name.lowercase()
+    }
+  }
+
+  /**
+   * Determine if a dedicated clock sync channel should be created. Returns true if:
+   * 1. Annotation specifies a type that differs from main channel type, OR
+   * 2. Default behavior applies (Zephyr + TCP/RUDP + clock sync enabled)
+   */
+  fun shouldUseClockSyncChannel(
+      platform: PlatformType.Platform,
+      clockSyncEnabled: Boolean
+  ): Boolean {
+    val annotation = getClockSyncChannelAnnotation()
+
+    // If annotation says "auto" or not specified, use default behavior
+    if (annotation == null || annotation == "auto") {
+      return clockSyncEnabled &&
+          platform == PlatformType.Platform.ZEPHYR &&
+          networkChannel.supportsClockSyncUdpChannel()
+    }
+
+    // If annotation specifies a type, check if it differs from main channel type
+    val mainType = getMainChannelTypeName()
+    val isValidType = annotation in listOf("tcp", "rudp", "udp")
+    return isValidType && annotation != mainType && networkChannel.supportsClockSyncUdpChannel()
+  }
+
+  /**
+   * Get the channel type to use for clock sync (tcp, rudp, udp). Returns null if no clock sync
+   * channel should be created.
+   */
+  fun getClockSyncChannelType(platform: PlatformType.Platform, clockSyncEnabled: Boolean): String? {
+    val annotation = getClockSyncChannelAnnotation()
+
+    if (!shouldUseClockSyncChannel(platform, clockSyncEnabled)) {
+      return null
+    }
+
+    // If annotation is specified and not "auto", use that type
+    if (annotation != null && annotation != "auto") {
+      return annotation
+    }
+
+    // Default behavior: use UDP on Zephyr with TCP/RUDP
+    return "udp"
+  }
+
+  /**
+   * Get the C struct type name for the clock sync channel (e.g., "UdpIpChannel", "TcpIpChannel",
+   * "RUdpIpChannel"). Returns null if no clock sync channel should be created.
+   */
+  fun getClockSyncChannelCodeType(
+      platform: PlatformType.Platform,
+      clockSyncEnabled: Boolean
+  ): String? {
+    val channelType = getClockSyncChannelType(platform, clockSyncEnabled) ?: return null
+    return when (channelType) {
+      "tcp" -> "TcpIpChannel"
+      "rudp" -> "RUdpIpChannel"
+      "udp" -> "UdpIpChannel"
+      else -> "UdpIpChannel" // fallback
+    }
+  }
+
   private fun getClockSyncInterfaceForFederate(
       federate: UcFederate,
-      sideParamName: String
+      sideParamName: String,
+      clockSyncType: String?
   ): UcNetworkInterface? {
     val linkAttr = AttributeUtils.getLinkAttribute(groupedConnections.first().lfConn) ?: return null
     val sideName = linkAttr.getParamString(sideParamName)
     val commonName = linkAttr.getParamString("clock_sync_interface")
     val ifaceName = sideName ?: commonName
-    return ifaceName?.let { federate.getInterface(it) }
+    val explicitInterface = ifaceName?.let { federate.getInterface(it) }
+    if (explicitInterface != null) {
+      return explicitInterface
+    }
+
+    return when (clockSyncType) {
+      "tcp" -> federate.ensureIpInterfaceByType(NetworkChannelType.TCP_IP)
+      "rudp" -> federate.ensureIpInterfaceByType(NetworkChannelType.RUDP_IP)
+      else -> null
+    }
   }
 
   fun generateClockSyncNetworkChannelCtor(federate: UcFederate): String {
-    val srcClockSyncInterface = getClockSyncInterfaceForFederate(src, "clock_sync_left")
-    val destClockSyncInterface = getClockSyncInterfaceForFederate(dest, "clock_sync_right")
+    val clockSyncType = getClockSyncChannelType(networkChannel)
+    val srcClockSyncInterface =
+        getClockSyncInterfaceForFederate(src, "clock_sync_left", clockSyncType)
+    val destClockSyncInterface =
+        getClockSyncInterfaceForFederate(dest, "clock_sync_right", clockSyncType)
+
     return if (federate == src) {
-      networkChannel.generateClockSyncUdpChannelCtorSrc(
-          srcClockSyncInterface, destClockSyncInterface)
-          ?: throw IllegalArgumentException(
-              "Clock sync UDP channel requested for unsupported network channel type ${networkChannel.type}")
+      when (clockSyncType) {
+        "tcp" ->
+            networkChannel.generateClockSyncTcpChannelCtorSrc(
+                srcClockSyncInterface, destClockSyncInterface)
+                ?: throw IllegalArgumentException(
+                    "Clock sync TCP channel not supported for network channel type ${networkChannel.type}")
+        "rudp" ->
+            networkChannel.generateClockSyncRudpChannelCtorSrc(
+                srcClockSyncInterface, destClockSyncInterface)
+                ?: throw IllegalArgumentException(
+                    "Clock sync RUDP channel not supported for network channel type ${networkChannel.type}")
+        else ->
+            networkChannel.generateClockSyncUdpChannelCtorSrc(
+                srcClockSyncInterface, destClockSyncInterface)
+                ?: throw IllegalArgumentException(
+                    "Clock sync UDP channel not supported for network channel type ${networkChannel.type}")
+      }
     } else {
-      networkChannel.generateClockSyncUdpChannelCtorDest(
-          srcClockSyncInterface, destClockSyncInterface)
-          ?: throw IllegalArgumentException(
-              "Clock sync UDP channel requested for unsupported network channel type ${networkChannel.type}")
+      when (clockSyncType) {
+        "tcp" ->
+            networkChannel.generateClockSyncTcpChannelCtorDest(
+                srcClockSyncInterface, destClockSyncInterface)
+                ?: throw IllegalArgumentException(
+                    "Clock sync TCP channel not supported for network channel type ${networkChannel.type}")
+        "rudp" ->
+            networkChannel.generateClockSyncRudpChannelCtorDest(
+                srcClockSyncInterface, destClockSyncInterface)
+                ?: throw IllegalArgumentException(
+                    "Clock sync RUDP channel not supported for network channel type ${networkChannel.type}")
+        else ->
+            networkChannel.generateClockSyncUdpChannelCtorDest(
+                srcClockSyncInterface, destClockSyncInterface)
+                ?: throw IllegalArgumentException(
+                    "Clock sync UDP channel not supported for network channel type ${networkChannel.type}")
+      }
     }
+  }
+
+  private fun getClockSyncChannelType(networkChannel: UcNetworkChannel): String? {
+    val annotation = getClockSyncChannelAnnotation()
+    return if (annotation != null && annotation != "auto") annotation else "udp"
   }
 }
 

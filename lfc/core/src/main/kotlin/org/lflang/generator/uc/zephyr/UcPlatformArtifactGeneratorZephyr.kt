@@ -8,8 +8,6 @@ import org.lflang.generator.ZephyrConfig
 import org.lflang.generator.uc.UcConnectionGenerator
 import org.lflang.generator.uc.UcGeneratorFactory
 import org.lflang.generator.uc.UcPlatformArtifactGenerator
-import org.lflang.generator.uc.UcRudpIpInterface
-import org.lflang.generator.uc.UcTcpIpInterface
 import org.lflang.lf.Instantiation
 import org.lflang.target.TargetConfig
 import org.lflang.target.property.FedNetInterfaceProperty

@@ -293,6 +293,26 @@ abstract class UcNetworkChannel(
       destClockSyncInterface: UcNetworkInterface? = null
   ): String? = null
 
+  open fun generateClockSyncTcpChannelCtorSrc(
+      srcClockSyncInterface: UcNetworkInterface? = null,
+      destClockSyncInterface: UcNetworkInterface? = null
+  ): String? = null
+
+  open fun generateClockSyncTcpChannelCtorDest(
+      srcClockSyncInterface: UcNetworkInterface? = null,
+      destClockSyncInterface: UcNetworkInterface? = null
+  ): String? = null
+
+  open fun generateClockSyncRudpChannelCtorSrc(
+      srcClockSyncInterface: UcNetworkInterface? = null,
+      destClockSyncInterface: UcNetworkInterface? = null
+  ): String? = null
+
+  open fun generateClockSyncRudpChannelCtorDest(
+      srcClockSyncInterface: UcNetworkInterface? = null,
+      destClockSyncInterface: UcNetworkInterface? = null
+  ): String? = null
+
   abstract val codeType: String
 
   companion object {
@@ -332,7 +352,20 @@ abstract class UcNetworkChannel(
         serverLhs = if (serverSideAttr == null) true else !serverSideAttr!!.equals("right")
       }
 
-      require(srcIf.type == destIf.type)
+      if (srcIf.type != destIf.type) {
+        val matchingDest = bundle.dest.getInterfaceByType(srcIf.type)
+        val matchingSrc = bundle.src.getInterfaceByType(destIf.type)
+        when {
+          matchingDest != null -> destIf = matchingDest
+          matchingSrc != null -> srcIf = matchingSrc
+        }
+      }
+
+      require(srcIf.type == destIf.type) {
+        "Federated link interfaces must match (left=${srcIf.type}, right=${destIf.type}). " +
+            "Use @link(left=\"...\", right=\"...\") to set the main channel, and " +
+            "@link(clock_sync_channel=\"...\", clock_sync_interface=\"...\") for clock sync."
+      }
       when (srcIf.type) {
         TCP_IP -> {
           val srcEp =
@@ -419,6 +452,32 @@ private fun buildClockSyncCtor(
   return "UdpIpChannel_ctor(&self->clock_sync_channel, \"${localEndpoint.ipAddress.address}\", ${localEndpoint.port}, \"${remoteEndpoint.ipAddress.address}\", ${remoteEndpoint.port}, ${family});"
 }
 
+private fun tcpEndpointFromInterface(iface: UcNetworkInterface?): UcTcpIpEndpoint? {
+  return (iface as? UcTcpIpInterface)?.createEndpoint(null)
+}
+
+private fun rudpEndpointFromInterface(iface: UcNetworkInterface?): UcRudpIpEndpoint? {
+  return (iface as? UcRudpIpInterface)?.createEndpoint(null)
+}
+
+private fun buildClockSyncTcpCtor(
+    localEndpoint: UcTcpIpEndpoint,
+    remoteEndpoint: UcTcpIpEndpoint
+): String {
+  // For TCP clock sync, we use the same endpoints as the main channel unless overridden
+  val family = protocolFamilyForIp(remoteEndpoint.ipAddress)
+  return "TcpIpChannel_ctor(&self->clock_sync_channel, \"${remoteEndpoint.ipAddress.address}\", ${remoteEndpoint.port}, ${family}, false);"
+}
+
+private fun buildClockSyncRudpCtor(
+    localEndpoint: UcRudpIpEndpoint,
+    remoteEndpoint: UcRudpIpEndpoint
+): String {
+  // For RUDP clock sync, we use the same endpoints as the main channel unless overridden
+  val family = protocolFamilyForIp(localEndpoint.ipAddress)
+  return "RUdpIpChannel_ctor(&self->clock_sync_channel, \"${localEndpoint.ipAddress.address}\", ${localEndpoint.port}, \"${remoteEndpoint.ipAddress.address}\", ${remoteEndpoint.port}, ${family}, true);"
+}
+
 private fun resolveClockSyncEndpoints(
     srcMainEndpoint: UcNetworkEndpoint,
     destMainEndpoint: UcNetworkEndpoint,
@@ -494,6 +553,38 @@ class UcTcpIpChannel(
     return buildClockSyncCtor(destEndpoint, srcEndpoint)
   }
 
+  override fun generateClockSyncTcpChannelCtorSrc(
+      srcClockSyncInterface: UcNetworkInterface?,
+      destClockSyncInterface: UcNetworkInterface?
+  ): String? {
+    return buildClockSyncTcpCtor(srcTcp, destTcp)
+  }
+
+  override fun generateClockSyncTcpChannelCtorDest(
+      srcClockSyncInterface: UcNetworkInterface?,
+      destClockSyncInterface: UcNetworkInterface?
+  ): String? {
+    return buildClockSyncTcpCtor(destTcp, srcTcp)
+  }
+
+  override fun generateClockSyncRudpChannelCtorSrc(
+      srcClockSyncInterface: UcNetworkInterface?,
+      destClockSyncInterface: UcNetworkInterface?
+  ): String? {
+    val srcRudp = rudpEndpointFromInterface(srcClockSyncInterface) ?: return null
+    val destRudp = rudpEndpointFromInterface(destClockSyncInterface) ?: return null
+    return buildClockSyncRudpCtor(srcRudp, destRudp)
+  }
+
+  override fun generateClockSyncRudpChannelCtorDest(
+      srcClockSyncInterface: UcNetworkInterface?,
+      destClockSyncInterface: UcNetworkInterface?
+  ): String? {
+    val srcRudp = rudpEndpointFromInterface(srcClockSyncInterface) ?: return null
+    val destRudp = rudpEndpointFromInterface(destClockSyncInterface) ?: return null
+    return buildClockSyncRudpCtor(destRudp, srcRudp)
+  }
+
   override val codeType: String
     get() = "TcpIpChannel"
 }
@@ -554,6 +645,38 @@ class UcRudpIpChannel(
     val (srcEndpoint, destEndpoint) =
         getClockSyncEndpoints(srcClockSyncInterface, destClockSyncInterface)
     return buildClockSyncCtor(destEndpoint, srcEndpoint)
+  }
+
+  override fun generateClockSyncRudpChannelCtorSrc(
+      srcClockSyncInterface: UcNetworkInterface?,
+      destClockSyncInterface: UcNetworkInterface?
+  ): String? {
+    return buildClockSyncRudpCtor(srcRudp, destRudp)
+  }
+
+  override fun generateClockSyncRudpChannelCtorDest(
+      srcClockSyncInterface: UcNetworkInterface?,
+      destClockSyncInterface: UcNetworkInterface?
+  ): String? {
+    return buildClockSyncRudpCtor(destRudp, srcRudp)
+  }
+
+  override fun generateClockSyncTcpChannelCtorSrc(
+      srcClockSyncInterface: UcNetworkInterface?,
+      destClockSyncInterface: UcNetworkInterface?
+  ): String? {
+    val srcTcp = tcpEndpointFromInterface(srcClockSyncInterface) ?: return null
+    val destTcp = tcpEndpointFromInterface(destClockSyncInterface) ?: return null
+    return buildClockSyncTcpCtor(srcTcp, destTcp)
+  }
+
+  override fun generateClockSyncTcpChannelCtorDest(
+      srcClockSyncInterface: UcNetworkInterface?,
+      destClockSyncInterface: UcNetworkInterface?
+  ): String? {
+    val srcTcp = tcpEndpointFromInterface(srcClockSyncInterface) ?: return null
+    val destTcp = tcpEndpointFromInterface(destClockSyncInterface) ?: return null
+    return buildClockSyncTcpCtor(destTcp, srcTcp)
   }
 
   override val codeType: String

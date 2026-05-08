@@ -331,7 +331,8 @@ public class AttributeSpec {
                 new AttrParamSpec("left", AttrParamType.STRING, true),
                 new AttrParamSpec("right", AttrParamType.STRING, true),
                 new AttrParamSpec("server_port", AttrParamType.INT, true),
-                new AttrParamSpec("server_side", AttrParamType.STRING, true))));
+                new AttrParamSpec("server_side", AttrParamType.STRING, true),
+                new AttrParamSpec("clock_sync_channel", AttrParamType.STRING, false))));
     // @platform_riot
     ATTRIBUTE_SPECS_BY_NAME.put("platform_riot", new AttributeSpec(null));
     // @platform_zephyr
