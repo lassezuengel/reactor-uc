@@ -479,6 +479,7 @@ class UcConnectionGenerator(
         val hasClockSyncChannel =
             clockSyncEnabled &&
                 effectivePlatform == PlatformType.Platform.ZEPHYR &&
+                currentFederate!!.clockSyncParams.useDedicatedClockSyncChannel &&
                 bundle.hasClockSyncNetworkChannel()
         val clockSyncChannelField =
             if (hasClockSyncChannel) "UdpIpChannel clock_sync_channel;" else ""
@@ -503,6 +504,7 @@ class UcConnectionGenerator(
         val hasClockSyncChannel =
             clockSyncEnabled &&
                 effectivePlatform == PlatformType.Platform.ZEPHYR &&
+                currentFederate!!.clockSyncParams.useDedicatedClockSyncChannel &&
                 bundle.hasClockSyncNetworkChannel()
         val clockSyncChannelCtor =
             if (hasClockSyncChannel) bundle.generateClockSyncNetworkChannelCtor(currentFederate!!)

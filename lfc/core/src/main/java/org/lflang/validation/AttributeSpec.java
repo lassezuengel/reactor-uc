@@ -350,6 +350,8 @@ public class AttributeSpec {
                 new AttrParamSpec("period", AttrParamType.BIGINT, true),
                 new AttrParamSpec("max_adj", AttrParamType.INT, true),
                 new AttrParamSpec("kp", AttrParamType.FLOAT, true),
-                new AttrParamSpec("ki", AttrParamType.FLOAT, true))));
+                new AttrParamSpec("ki", AttrParamType.FLOAT, true),
+                new AttrParamSpec("dedicated", AttrParamType.BOOLEAN, true)
+              )));
   }
 }

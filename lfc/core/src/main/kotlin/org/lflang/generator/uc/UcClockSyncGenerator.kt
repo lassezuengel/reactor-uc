@@ -13,6 +13,7 @@ data class UcClockSyncParameters(
     val maxAdj: Int = UcClockSyncParameters.DEFAULT_MAX_ADJ,
     val Kp: Double = UcClockSyncParameters.DEFAULT_KP,
     val Ki: Double = UcClockSyncParameters.DEFAULT_KI,
+    val useDedicatedClockSyncChannel: Boolean = UcClockSyncParameters.DEFAULT_USE_DEDICATED_CLOCK_SYNC_CHANNEL,
 ) {
   companion object {
     const val DEFAULT_DISABLED = false
@@ -21,6 +22,7 @@ data class UcClockSyncParameters(
     const val DEFAULT_MAX_ADJ = 200000000
     const val DEFAULT_KP = 0.7
     const val DEFAULT_KI = 0.3
+    const val DEFAULT_USE_DEDICATED_CLOCK_SYNC_CHANNEL = true
   }
 
   // Secondary constructor that initializes the data class from an Attribute object
@@ -32,7 +34,8 @@ data class UcClockSyncParameters(
       period = attr.getParamBigInt("period") ?: DEFAULT_PERIOD,
       maxAdj = attr.getParamInt("max_adj") ?: DEFAULT_MAX_ADJ,
       Kp = attr.getParamFloat("kp") ?: DEFAULT_KP,
-      Ki = attr.getParamFloat("ki") ?: DEFAULT_KI)
+      Ki = attr.getParamFloat("ki") ?: DEFAULT_KI,
+      useDedicatedClockSyncChannel = attr.getParamBool("dedicated") ?: DEFAULT_USE_DEDICATED_CLOCK_SYNC_CHANNEL)
 }
 
 class UcClockSyncGenerator(
