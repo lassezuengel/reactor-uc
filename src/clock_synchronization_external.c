@@ -1,3 +1,14 @@
+/**
+ * TODO: Currently, glossy followers will only initiate fine-grained glossy "searches"
+ * after three consecutive misses. This, of course, means that if a follower isn't
+ * synchronized with the grandmaster at startup, it will take at least three (failed) sync
+ * rounds before it initiates a search and has a much greater chance of successfully
+ * synchronizing with the grandmaster. We should consider initiating a search immediately
+ * at startup if the follower is not synchronized, and perhaps even hold the program at
+ * startup (glossy blocks federate execution), so that we can make sure that the program
+ * will only start up with some notion of synchronization already in place.
+ */
+
 #include "reactor-uc/clock_synchronization_external.h"
 
 #include "reactor-uc/environments/federated_environment.h"

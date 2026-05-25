@@ -8,9 +8,21 @@
 
 typedef struct Environment Environment;
 
+/**
+ * @brief API that the external clock synchronization mechanism needs to implement.
+ *
+ * The API implementation is provided by the user of the clock synchronization module
+ * and is called by the module to perform the actual clock synchronization logic.
+ *
+ * Currently, it's completely separate from the LF federation structure, meaning that
+ * we do not use local neighborhoods, especially no connection bundles. This allows
+ * to implement more general synchronization mechanisms like glossy network flooding
+ * and other mechanisms based on concurrent transmissions (CT), which do not fit well
+ * into the LF federation structure.
+ */
 typedef struct {
-  // Initialize the external clock synchronization mechanism. The parameters are passed to the API implementation
-  // and may be used to configure it.
+  // Initialize the external clock synchronization mechanism. The parameters are passed to
+  // the API implementation and may be used to configure it.
   int (*init)(bool grandmaster, int federate_id);
   // Schedule the next clock synchronization event. The API implementation should compute the next time to run the sync
   // and the clock offset to apply (if this is not the grandmaster) and return them through the output parameters.
@@ -28,6 +40,15 @@ typedef struct {
   int message_type;
 } ExternalClockSyncEvent;
 
+
+/**
+ * @brief Clock synchronization module that uses an external API to perform clock synchronization.
+ *
+ * This module is a normal system event handler, which schedules its own events to perform clock
+ * synchronization at the times determined by the API. When the scheduled event is handled, it
+ * calls the API's schedule function to perform one round of clock synchronization and schedule
+ * the next sync event.
+ */
 typedef struct ClockSynchronizationExternal {
   SystemEventHandler super;
   Environment* env;
