@@ -40,17 +40,20 @@ static void ClockSynchronizationExternal_handle_system_event(SystemEventHandler*
 }
 
 void ClockSynchronizationExternal_ctor(ClockSynchronizationExternal* self, Environment* env,
-                                       const ExternalClockSyncApi* api, size_t payload_size, void* payload_buf,
-                                       bool* payload_used_buf, size_t payload_buf_capacity) {
+                                       const ExternalClockSyncApi* api, bool is_grandmaster, int federate_id,
+                                       size_t payload_size, void* payload_buf, bool* payload_used_buf,
+                                       size_t payload_buf_capacity) {
   self->env = env;
   self->api = api;
+  self->is_grandmaster = is_grandmaster;
+  self->federate_id = federate_id;
   self->super.handle = ClockSynchronizationExternal_handle_system_event;
 
   EventPayloadPool_ctor(&self->super.payload_pool, (char*)payload_buf, payload_used_buf, payload_size,
                         payload_buf_capacity, EXTERNAL_CLOCK_SYNC_RESERVED_EVENTS);
 
   if (self->api && self->api->init) {
-    int ret = self->api->init();
+    int ret = self->api->init(self->is_grandmaster, self->federate_id);
     if (ret != 0) {
       LF_WARN(CLOCK_SYNC, "External clock sync init returned %d", ret);
     }
