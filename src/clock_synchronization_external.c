@@ -39,14 +39,28 @@ static void ClockSynchronizationExternal_handle_system_event(SystemEventHandler*
   self->super.payload_pool.free(&self->super.payload_pool, event->super.payload);
 }
 
-void ClockSynchronizationExternal_ctor(ClockSynchronizationExternal* self, Environment* env, size_t payload_size,
-                                       void* payload_buf, bool* payload_used_buf, size_t payload_buf_capacity) {
+void ClockSynchronizationExternal_ctor(ClockSynchronizationExternal* self, Environment* env,
+                                       const ExternalClockSyncApi* api, size_t payload_size, void* payload_buf,
+                                       bool* payload_used_buf, size_t payload_buf_capacity) {
   self->env = env;
+  self->api = api;
   self->super.handle = ClockSynchronizationExternal_handle_system_event;
 
   EventPayloadPool_ctor(&self->super.payload_pool, (char*)payload_buf, payload_used_buf, payload_size,
                         payload_buf_capacity, EXTERNAL_CLOCK_SYNC_RESERVED_EVENTS);
 
+  if (self->api && self->api->init) {
+    int ret = self->api->init();
+    if (ret != 0) {
+      LF_WARN(CLOCK_SYNC, "External clock sync init returned %d", ret);
+    }
+  }
+  if (self->api && self->api->schedule) {
+    int ret = self->api->schedule();
+    if (ret != 0) {
+      LF_WARN(CLOCK_SYNC, "External clock sync schedule returned %d", ret);
+    }
+  }
   LF_INFO(CLOCK_SYNC, "Hello, external clock sync mechanism");
   ClockSynchronizationExternal_schedule_system_event(self, self->env->get_physical_time(self->env),
                                                      EXTERNAL_CLOCK_SYNC_EVENT_HELLO);

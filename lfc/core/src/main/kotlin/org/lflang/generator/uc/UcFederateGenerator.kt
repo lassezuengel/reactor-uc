@@ -23,7 +23,7 @@ class UcFederateGenerator(
   private val instances =
       UcInstanceGenerator(
           container, parameters, ports, connections, reactions, fileConfig, messageReporter)
-  private val clockSync = UcClockSyncGenerator(currentFederate, connections, targetConfig)
+    private val clockSync = UcClockSyncGenerator(currentFederate, connections, targetConfig)
     private val externalClockSync = UcExternalClockSyncGenerator(container)
 
   private val startupCooordinator =
@@ -89,7 +89,9 @@ class UcFederateGenerator(
             |#include "reactor-uc/reactor-uc.h"
             |#include "${fileConfig.getReactorHeaderPath(reactor).toUnixString()}"
         ${" |"..connections.generateNetworkChannelIncludes()}
+        ${" |"..externalClockSync.generateModuleInclude()}
             |
+        ${" |"..externalClockSync.generateApiStruct()}
         ${" |"..startupCooordinator.generateSelfStruct()}
         ${" |"..clockSync.generateSelfStruct()}
         ${" |"..externalClockSync.generateSelfStruct()}
