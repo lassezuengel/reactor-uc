@@ -1,6 +1,8 @@
 #ifndef REACTOR_UC_CLOCK_SYNCHRONIZATION_EXTERNAL_H
 #define REACTOR_UC_CLOCK_SYNCHRONIZATION_EXTERNAL_H
 
+#include <stdint.h>
+
 #include "reactor-uc/event.h"
 #include "reactor-uc/tag.h"
 
@@ -8,7 +10,7 @@ typedef struct Environment Environment;
 
 typedef struct {
   int (*init)(bool grandmaster, int federate_id);
-  int (*schedule)(void);
+  int (*schedule)(int64_t* next_glossy_ms);
 } ExternalClockSyncApi;
 
 typedef struct {

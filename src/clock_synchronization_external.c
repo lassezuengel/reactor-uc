@@ -4,6 +4,8 @@
 #include "reactor-uc/error.h"
 #include "reactor-uc/logging.h"
 
+#include <inttypes.h>
+
 #define EXTERNAL_CLOCK_SYNC_RESERVED_EVENTS 1
 
 enum { EXTERNAL_CLOCK_SYNC_EVENT_HELLO = 1 };
@@ -31,12 +33,38 @@ static void ClockSynchronizationExternal_schedule_system_event(ClockSynchronizat
   }
 }
 
+static bool ClockSynchronizationExternal_schedule_next(ClockSynchronizationExternal* self) {
+  if (!self->api || !self->api->schedule) {
+    return false;
+  }
+
+  int64_t next_glossy_ms = 0;
+  int ret = self->api->schedule(&next_glossy_ms);
+  if (ret != 0) {
+    // This is not an error condition per se, since the schedule function may return non-zero
+    // to indicate that the last round failed. Not sure if we actually want to expose that to LF
+    // but for now, as we do expose it, just log a nice little warning.
+    LF_WARN(CLOCK_SYNC, "External clock sync schedule returned %d", ret);
+  }
+  if (next_glossy_ms <= 0) {
+    LF_WARN(CLOCK_SYNC, "External clock sync schedule returned invalid next time %" PRId64, next_glossy_ms);
+    return false;
+  }
+
+  int now = k_uptime_get();
+
+  instant_t next_time = (instant_t)next_glossy_ms * (instant_t)1000000;
+  LF_WARN(CLOCK_SYNC, "Scheduling at next time = %d ms (now = %d ms)", (int)next_glossy_ms, now);
+  ClockSynchronizationExternal_schedule_system_event(self, next_time, EXTERNAL_CLOCK_SYNC_EVENT_HELLO);
+  return true;
+}
+
 static void ClockSynchronizationExternal_handle_system_event(SystemEventHandler* _self, SystemEvent* event) {
   ClockSynchronizationExternal* self = (ClockSynchronizationExternal*)_self;
   ExternalClockSyncEvent* payload = (ExternalClockSyncEvent*)event->super.payload;
   LF_INFO(CLOCK_SYNC, "External clock sync event handled (type=%d)", payload->message_type);
-  (void)self;
   self->super.payload_pool.free(&self->super.payload_pool, event->super.payload);
+  ClockSynchronizationExternal_schedule_next(self);
 }
 
 void ClockSynchronizationExternal_ctor(ClockSynchronizationExternal* self, Environment* env,
@@ -56,12 +84,6 @@ void ClockSynchronizationExternal_ctor(ClockSynchronizationExternal* self, Envir
     int ret = self->api->init(self->is_grandmaster, self->federate_id);
     if (ret != 0) {
       LF_WARN(CLOCK_SYNC, "External clock sync init returned %d", ret);
-    }
-  }
-  if (self->api && self->api->schedule) {
-    int ret = self->api->schedule();
-    if (ret != 0) {
-      LF_WARN(CLOCK_SYNC, "External clock sync schedule returned %d", ret);
     }
   }
   LF_INFO(CLOCK_SYNC, "Hello, external clock sync mechanism");

@@ -610,7 +610,7 @@ typedef struct FederatedInputConnection FederatedInputConnection;
     bool used[(NumEvents)];                                                                                            \
   } ReactorName##ExternalClockSync;
 
-#define LF_DEFINE_EXTERNAL_CLOCK_SYNC_CTOR(ReactorName, NumEvents, ApiSymbol, IsGrandmaster, FederateId)              \
+#define LF_DEFINE_EXTERNAL_CLOCK_SYNC_CTOR(ReactorName, NumEvents, ApiSymbol, IsGrandmaster, FederateId)               \
   void ReactorName##ExternalClockSync_ctor(ReactorName##ExternalClockSync* self, Environment* env) {                   \
     ClockSynchronizationExternal_ctor(&self->super, env, &(ApiSymbol), (IsGrandmaster), (FederateId),                  \
                                       sizeof(ExternalClockSyncEvent), (void*)self->events, self->used, (NumEvents));   \
