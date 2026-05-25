@@ -47,9 +47,16 @@ static bool ClockSynchronizationExternal_schedule_next_sync(ClockSynchronization
     return false;
   }
 
+  FederatedEnvironment* env_fed = (FederatedEnvironment*)self->env;
+
   int64_t next_sync_run_ms = 0;
   int64_t clock_offset_ms = 0;
+
+  instant_t clock_time = self->env->get_physical_time(self->env);
+  LF_DEBUG(CLOCK_SYNC_EXT, "Starting sync run at %" PRId64 " ms", clock_time / 1000000);
+
   int ret = self->api->schedule(&next_sync_run_ms, &clock_offset_ms);
+
   if (ret != 0) {
     // This is not an error condition per se, since the schedule function may return non-zero
     // to indicate that the last round failed. Not sure if we actually want to expose that to LF
@@ -61,19 +68,26 @@ static bool ClockSynchronizationExternal_schedule_next_sync(ClockSynchronization
     return false;
   }
 
+  int64_t schedule_time_ms = next_sync_run_ms;
   if (!self->is_grandmaster && ret == 0) {
     // The sync run succeeded and we're not the grandmaster. Update the clock
-    // with the offset returned by the API.
-    // FederatedEnvironment* env_fed = (FederatedEnvironment*)self->env;
+    // with the offset returned by the API (offset is local - reference).
     interval_t offset_ns = (interval_t)clock_offset_ms * (interval_t)1000000;
-    LF_ERR(CLOCK_SYNC_EXT, "Applying clock offset of %" PRId64 " ms (%" PRId64 " ns)", clock_offset_ms, offset_ns);
-    // env_fed->clock.adjust_time(&env_fed->clock, offset_ns);
+    instant_t raw_now = self->env->platform->get_physical_time(self->env->platform);
+    instant_t corrected = raw_now - offset_ns;
+    LF_INFO(CLOCK_SYNC_EXT, "Stepping clock by offset %" PRId64 " ms", clock_offset_ms);
+    env_fed->clock.set_time(&env_fed->clock, corrected);
+
+    // For non-grandmaster nodes, convert local schedule time to reference time domain.
+    // We stepped the clock by the offset, so the schedule time in the local time domain
+    // is now correct with respect to the reference time domain!
+    schedule_time_ms = next_sync_run_ms - clock_offset_ms;
   }
 
-  // Schedule the next sync event at the time returned by the API.
-  instant_t next_time = (instant_t)next_sync_run_ms * (instant_t)1000000;
+  // Schedule the next sync event at the time returned by the API (reference time domain).
+  instant_t next_time = (instant_t)(schedule_time_ms) * (instant_t)1000000;
   int64_t now_ms = (int64_t)(self->env->get_physical_time(self->env) / 1000000);
-  LF_DEBUG(CLOCK_SYNC_EXT, "Scheduling at next time = %" PRId64 " ms (now = %" PRId64 " ms)", next_sync_run_ms, now_ms);
+  LF_DEBUG(CLOCK_SYNC_EXT, "Scheduling at next time = %" PRId64 " ms (now = %" PRId64 " ms)", schedule_time_ms, now_ms);
   ClockSynchronizationExternal_schedule_system_event(self, next_time, EXTERNAL_CLOCK_SYNC_EVENT_SYNC);
   return true;
 }
