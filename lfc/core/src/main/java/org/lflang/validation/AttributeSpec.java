@@ -353,5 +353,9 @@ public class AttributeSpec {
                 new AttrParamSpec("ki", AttrParamType.FLOAT, true),
                 new AttrParamSpec("dedicated", AttrParamType.BOOLEAN, true)
               )));
+    // @external_clock_sync(status="on")
+    ATTRIBUTE_SPECS_BY_NAME.put(
+      "external_clock_sync",
+      new AttributeSpec(List.of(new AttrParamSpec("status", AttrParamType.STRING, true))));
   }
 }

@@ -603,6 +603,24 @@ typedef struct FederatedInputConnection FederatedInputConnection;
 
 #define LF_INITIALIZE_CLOCK_SYNC(ReactorName) ReactorName##ClockSynchronization_ctor(&self->clock_sync, env);
 
+#define LF_DEFINE_EXTERNAL_CLOCK_SYNC_STRUCT(ReactorName, NumEvents)                                                   \
+  typedef struct {                                                                                                     \
+    ClockSynchronizationExternal super;                                                                                \
+    ExternalClockSyncEvent events[(NumEvents)];                                                                        \
+    bool used[(NumEvents)];                                                                                            \
+  } ReactorName##ExternalClockSync;
+
+#define LF_DEFINE_EXTERNAL_CLOCK_SYNC_CTOR(ReactorName, NumEvents)                                                     \
+  void ReactorName##ExternalClockSync_ctor(ReactorName##ExternalClockSync* self, Environment* env) {                   \
+    ClockSynchronizationExternal_ctor(&self->super, env, sizeof(ExternalClockSyncEvent), (void*)self->events,          \
+                                      self->used, (NumEvents));                                                        \
+  }
+
+#define LF_DEFINE_EXTERNAL_CLOCK_SYNC(ReactorName) ReactorName##ExternalClockSync external_clock_sync;
+
+#define LF_INITIALIZE_EXTERNAL_CLOCK_SYNC(ReactorName)                                                                 \
+  ReactorName##ExternalClockSync_ctor(&self->external_clock_sync, env);
+
 #define LF_INITIALIZE_FEDERATED_INPUT_CONNECTION(ReactorName, InputName, DeserializeFunc)                              \
   ReactorName##_##InputName##_conn_ctor(&self->InputName, self->super.parent);                                         \
   self->inputs[_inputs_idx] = &self->InputName.super;                                                                  \

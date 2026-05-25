@@ -5,6 +5,7 @@
 #include "reactor-uc/network_channel.h"
 #include "reactor-uc/startup_coordinator.h"
 #include "reactor-uc/clock_synchronization.h"
+#include "reactor-uc/clock_synchronization_external.h"
 #include "reactor-uc/physical_clock.h"
 
 typedef struct FederatedEnvironment FederatedEnvironment;

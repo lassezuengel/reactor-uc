@@ -182,12 +182,15 @@ class UcMainGeneratorFederated(
   private val netBundlesSize = ucConnectionGenerator.getNumFederatedConnectionBundles()
   private val clockSyncGenerator =
       UcClockSyncGenerator(currentFederate, ucConnectionGenerator, targetConfig)
+  private val externalClockSyncGenerator = UcExternalClockSyncGenerator(top)
   private val longestPath = 0
 
   override fun getNumSystemEvents(): Int {
     val clockSyncSystemEvents = UcClockSyncGenerator.getNumSystemEvents(netBundlesSize)
     val startupCoordinatorEvents = UcStartupCoordinatorGenerator.getNumSystemEvents(netBundlesSize)
-    return clockSyncSystemEvents + startupCoordinatorEvents
+    val externalClockSyncEvents =
+        if (externalClockSyncGenerator.enabled()) UcExternalClockSyncGenerator.getNumSystemEvents() else 0
+    return clockSyncSystemEvents + startupCoordinatorEvents + externalClockSyncEvents
   }
 
   override fun keepAlive(): Boolean {
