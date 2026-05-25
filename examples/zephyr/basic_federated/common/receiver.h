@@ -51,11 +51,11 @@ LF_DEFINE_REACTION_BODY(Receiver, r) {
   LF_SCOPE_SELF(Receiver);
   LF_SCOPE_ENV();
   gpio_pin_toggle_dt(&led);
-  printf("Reaction triggered @ " PRINTF_TIME " (" PRINTF_TIME "), " PRINTF_TIME ")\n", env->get_elapsed_logical_time(env),
-         env->get_logical_time(env), env->get_physical_time(env));
+  printf("Reaction triggered @ " PRINTF_TIME " (" PRINTF_TIME "), " PRINTF_TIME ")\n",
+         env->get_elapsed_logical_time(env), env->get_logical_time(env), env->get_physical_time(env));
 }
 
-LF_REACTOR_CTOR_SIGNATURE_WITH_PARAMETERS(Receiver, InputExternalCtorArgs *in_external) {
+LF_REACTOR_CTOR_SIGNATURE_WITH_PARAMETERS(Receiver, InputExternalCtorArgs* in_external) {
   LF_REACTOR_CTOR_PREAMBLE();
   LF_REACTOR_CTOR(Receiver);
   LF_INITIALIZE_REACTION(Receiver, r, NEVER);
@@ -107,4 +107,4 @@ LF_REACTOR_CTOR_SIGNATURE(MainRecv) {
   LF_INITIALIZE_CLOCK_SYNC(Federate);
   lf_connect_federated_input(&self->Receiver_Sender_bundle.inputs[0]->super, &self->receiver->in[0].super);
 }
-LF_ENTRY_POINT_FEDERATED(MainRecv,32,32,32, FOREVER, true, 1, true)
+LF_ENTRY_POINT_FEDERATED(MainRecv, 32, 32, 32, FOREVER, true, 1, true, NULL)

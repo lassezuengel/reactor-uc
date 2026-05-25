@@ -127,7 +127,8 @@ static lf_ret_t FederatedEnvironment_poll_network_channels(Environment* super) {
 
 void FederatedEnvironment_ctor(FederatedEnvironment* self, Reactor* main, Scheduler* scheduler, bool fast_mode,
                                FederatedConnectionBundle** net_bundles, size_t net_bundles_size,
-                               StartupCoordinator* startup_coordinator, ClockSynchronization* clock_sync) {
+                               StartupCoordinator* startup_coordinator, ClockSynchronization* clock_sync,
+                               ClockSynchronizationExternal* external_clock_sync) {
   Environment_ctor(&self->super, main, scheduler, fast_mode);
   self->super.assemble = FederatedEnvironment_assemble;
   self->super.start = FederatedEnvironment_start;
@@ -139,7 +140,8 @@ void FederatedEnvironment_ctor(FederatedEnvironment* self, Reactor* main, Schedu
   self->net_bundles = net_bundles;
   self->startup_coordinator = startup_coordinator;
   self->clock_sync = clock_sync;
-  self->do_clock_sync = clock_sync != NULL;
+  self->external_clock_sync = external_clock_sync;
+  self->do_clock_sync = clock_sync != NULL || external_clock_sync != NULL;
   PhysicalClock_ctor(&self->clock, &self->super, self->do_clock_sync);
 
   self->super.has_async_events = true;

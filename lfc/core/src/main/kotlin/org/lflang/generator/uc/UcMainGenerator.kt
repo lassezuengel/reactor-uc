@@ -182,7 +182,8 @@ class UcMainGeneratorFederated(
   private val netBundlesSize = ucConnectionGenerator.getNumFederatedConnectionBundles()
   private val clockSyncGenerator =
       UcClockSyncGenerator(currentFederate, ucConnectionGenerator, targetConfig)
-  private val externalClockSyncGenerator = UcExternalClockSyncGenerator(top)
+  private val externalClockSyncGenerator =
+      UcExternalClockSyncGenerator(top, currentFederate, otherFederates)
   private val longestPath = 0
 
   override fun getNumSystemEvents(): Int {
@@ -279,7 +280,8 @@ class UcMainGeneratorFederated(
         ${" |    "..generateInitializeScheduler()}
             |    FederatedEnvironment_ctor(&lf_environment, (Reactor *)&main_reactor, scheduler, ${fast()},
             |                     (FederatedConnectionBundle **) &main_reactor._bundles, ${netBundlesSize}, &main_reactor.${UcStartupCoordinatorGenerator.instName}.super,
-            |                     ${if (clockSyncGenerator.enabled()) "&main_reactor.${UcClockSyncGenerator.instName}.super" else "NULL"});
+            |                     ${if (clockSyncGenerator.enabled()) "&main_reactor.${UcClockSyncGenerator.instName}.super" else "NULL"},
+            |                     ${if (externalClockSyncGenerator.enabled()) "&main_reactor.${UcExternalClockSyncGenerator.instName}.super" else "NULL"});
             |    ${currentFederate.codeType}_ctor(&main_reactor, NULL, _lf_environment);
             |    _lf_environment->assemble(_lf_environment);
             |    _lf_environment->start(_lf_environment);

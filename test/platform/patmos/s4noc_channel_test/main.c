@@ -27,7 +27,7 @@ bool receiver_callback_called = false;
 
 void setUp(void) {
     /* init environment */
-    FederatedEnvironment_ctor(&fed_env, &parent, NULL, false, net_bundles, 2, &startup_coordinator, NULL);
+    FederatedEnvironment_ctor(&fed_env, &parent, NULL, false, net_bundles, 2, &startup_coordinator, NULL, NULL);
 
     /* init channel */
     LF_INFO(NET,"init channel");

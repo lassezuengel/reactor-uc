@@ -99,25 +99,25 @@ LF_DEFINE_REACTION_BODY(Sender, r) {
 
   pthread_mutex_lock(&uart_lock);
   printf("Sender: Timer triggered @ " PRINTF_TIME "\n", env->get_elapsed_logical_time(env));
-  
+
   // Prepare message structure
   lf_msg_t val;
   val.msg_num = self->msg_count + 1;  // Message number (1-indexed)
-  
+
   // Create message with number: "Hello 1", "Hello 2", etc.
   snprintf(val.msg, MSG_BUF_SIZE, "%s %d", MESSAGE_TEXT, val.msg_num);
   val.size = (int)strlen(val.msg);
-  
+
   printf("Sender reaction: preparing message #%d, size=%d, msg='%s'\n", val.msg_num, val.size, val.msg);
-  
+
   // Send message to receiver via federated output port
   lf_set(out, val);
-  
+
   // Increment and log message counter
   self->msg_count++;
   printf("Sender: Message %d sent. Max messages: %d\n", self->msg_count, MAX_MESSAGES);
   pthread_mutex_unlock(&uart_lock);
-  
+
   // Request environment shutdown only after sending all messages
   // Wait one more timer period to ensure last message is fully transmitted
   if (self->msg_count > MAX_MESSAGES) {
@@ -134,7 +134,7 @@ LF_REACTOR_CTOR_SIGNATURE_WITH_PARAMETERS(Sender, OutputExternalCtorArgs *out_ex
   printf("Sender: Initializing reaction and timer...\n");
   self->msg_count = 0;  // Initialize message counter
   LF_INITIALIZE_REACTION(Sender, r, NEVER);
-  LF_INITIALIZE_TIMER(Sender, t, SEC(TIMER_START_SEC), SEC(TIMER_PERIOD_SEC));  
+  LF_INITIALIZE_TIMER(Sender, t, SEC(TIMER_START_SEC), SEC(TIMER_PERIOD_SEC));
   LF_INITIALIZE_OUTPUT(Sender, out, NUM_CHILD_REACTORS, out_external);
 
   printf("Sender: Registering timer effects and port sources...\n");
@@ -156,11 +156,11 @@ typedef struct {
 /* Constructor for federated connection bundle: set up S4NOC channel and serialization */
 LF_FEDERATED_CONNECTION_BUNDLE_CTOR_SIGNATURE(Sender, Receiver) {
   LF_FEDERATED_CONNECTION_BUNDLE_CTOR_PREAMBLE();
-  
+
   // Initialize S4NOC polling channel to receiver core
   S4NOCPollChannel_ctor(&self->channel, RECEIVER_CORE_ID);
   printf("Sender: initialized channel for core %d\n", RECEIVER_CORE_ID);
-  
+
   LF_FEDERATED_CONNECTION_BUNDLE_CALL_CTOR();
   // Initialize federated output connection with serialization function
   LF_INITIALIZE_FEDERATED_OUTPUT_CONNECTION(Sender, out, serialize_msg_t);
@@ -190,16 +190,16 @@ LF_REACTOR_CTOR_SIGNATURE(MainSender) {
   LF_REACTOR_CTOR(MainSender);
   LF_FEDERATE_CTOR_PREAMBLE();
   LF_DEFINE_CHILD_OUTPUT_ARGS(sender, out, NUM_CHILD_REACTORS, NUM_CHILD_REACTORS);
-  
+
   // Initialize child sender reactor
   LF_INITIALIZE_CHILD_REACTOR_WITH_PARAMETERS(Sender, sender, NUM_CHILD_REACTORS, _sender_out_args[i]);
-  
+
   // Initialize federated connection bundle
   LF_INITIALIZE_FEDERATED_CONNECTION_BUNDLE(Sender, Receiver);
-  
+
   // Connect sender's output port to federated connection
   lf_connect_federated_output((Connection *)self->Sender_Receiver_bundle.outputs[0], (Port *)self->sender->out);
-  
+
   LF_INITIALIZE_STARTUP_COORDINATOR(Sender);
   LF_INITIALIZE_CLOCK_SYNC(Sender);
 }
@@ -228,24 +228,25 @@ void lf_start_sender(void) {
   LF_INITIALIZE_EVENT_QUEUE(Main_EventQueue, EVENT_QUEUE_SIZE)
   LF_INITIALIZE_EVENT_QUEUE(Main_SystemEventQueue, SYSTEM_EVENT_QUEUE_SIZE)
   LF_INITIALIZE_REACTION_QUEUE(Main_ReactionQueue, REACTION_QUEUE_SIZE)
-  
+
   // Create scheduler
   DynamicScheduler_ctor(&_scheduler, _lf_environment_sender, &Main_EventQueue.super, &Main_SystemEventQueue.super, &Main_ReactionQueue.super, TIMEOUT, KEEP_ALIVE);
-  
+
   // Initialize federated environment
-  FederatedEnvironment_ctor(&env, (Reactor *)&main_reactor, scheduler, false,  
-                    (FederatedConnectionBundle **) &main_reactor._bundles, NUM_BUNDLES, &main_reactor.startup_coordinator.super, 
-                    (DO_CLOCK_SYNC) ? &main_reactor.clock_sync.super : NULL);
-  
+  FederatedEnvironment_ctor(&env, (Reactor *)&main_reactor, scheduler, false,
+                    (FederatedConnectionBundle **) &main_reactor._bundles, NUM_BUNDLES,
+                    &main_reactor.startup_coordinator.super,
+                    (DO_CLOCK_SYNC) ? &main_reactor.clock_sync.super : NULL, NULL);
+
   // Initialize main reactor and connections
   MainSender_ctor(&main_reactor, NULL, _lf_environment_sender);
-  
+
   printf("lf_start_sender: assembling federated environment (bundles=%zu)\n", env.net_bundles_size);
   _lf_environment_sender->assemble(_lf_environment_sender);
-  
+
   printf("lf_start_sender: starting federated environment\n");
   _lf_environment_sender->start(_lf_environment_sender);
-  
+
   printf("lf_start_sender: federated environment started\n");
   lf_exit_sender();
 }

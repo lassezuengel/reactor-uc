@@ -21,11 +21,13 @@ struct FederatedEnvironment {
   size_t federation_longest_path;          // The longest path in the federation.
   StartupCoordinator* startup_coordinator; // A pointer to the startup coordinator, if the program has one.
   ClockSynchronization* clock_sync;        // A pointer to the clock synchronization module, if the program has one.
+  ClockSynchronizationExternal* external_clock_sync; // A pointer to the external clock synchronization module, if any.
 };
 
 void FederatedEnvironment_ctor(FederatedEnvironment* self, Reactor* main, Scheduler* scheduler, bool fast_mode,
                                FederatedConnectionBundle** net_bundles, size_t net_bundles_size,
-                               StartupCoordinator* startup_coordinator, ClockSynchronization* clock_sync);
+                               StartupCoordinator* startup_coordinator, ClockSynchronization* clock_sync,
+                               ClockSynchronizationExternal* external_clock_sync);
 void FederatedEnvironment_free(FederatedEnvironment* self);
 
 #endif
