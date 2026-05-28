@@ -147,6 +147,39 @@ static int _RUdpIpChannel_compute_recv_timeout_ms_locked(RUdpIpChannel* self, in
   return timeout_ms;
 }
 
+static int _RUdpIpChannel_compute_handshake_recv_timeout_ms(RUdpIpChannel* self, int64_t now) {
+  if (!self->is_client_role) {
+    return RUDP_RETRANSMIT_TIMEOUT_MS;
+  }
+
+  bool sent = false;
+  int64_t last_send_time_ms = 0;
+  int retransmit_delay_ms = RUDP_RETRANSMIT_TIMEOUT_MS;
+  if (!self->handshake_hello_acked) {
+    sent = self->handshake_hello_sent;
+    last_send_time_ms = self->handshake_last_hello_send_time_ms;
+    retransmit_delay_ms = self->handshake_hello_retransmit_delay_ms;
+  } else if (!self->handshake_ready_acked) {
+    sent = self->handshake_ready_sent;
+    last_send_time_ms = self->handshake_last_ready_send_time_ms;
+    retransmit_delay_ms = self->handshake_ready_retransmit_delay_ms;
+  } else {
+    return RUDP_RETRANSMIT_TIMEOUT_MS;
+  }
+
+  if (!sent) {
+    return 1;
+  }
+
+  int64_t elapsed_ms = now - last_send_time_ms;
+  int64_t remaining_ms = (int64_t)retransmit_delay_ms - 4 /* clock granularity compensation */ - elapsed_ms;
+  if (remaining_ms <= 1) {
+    return 1;
+  }
+
+  return (int)remaining_ms;
+}
+
 static bool _RUdpIpChannel_set_socket_recv_timeout_ms(RUdpIpChannel* self, int timeout_ms, bool log_on_failure) {
 #if defined(CONFIG_NET_CONTEXT_RCVTIMEO) && (CONFIG_NET_CONTEXT_RCVTIMEO == 1)
   struct timeval recv_timeout = {
@@ -369,8 +402,19 @@ static int _RUdpIpChannel_send_control_packet(RUdpIpChannel* self, int packet_ty
 
   ssize_t sent = send(self->fd, packet, sizeof(packet), 0);
   if (sent < 0) {
+    if (_RUdpIpChannel_is_retryable_send_errno(errno)) {
+      RUDP_IP_CHANNEL_WARN("Transient send failure for control packet type=%d errno=%d, will retry", packet_type,
+                           errno);
+      return NETWORK_CHANNEL_RET_RETRY;
+    }
+
     RUDP_IP_CHANNEL_ERR("Failed to send control packet type=%d errno=%d", packet_type, errno);
     return NETWORK_CHANNEL_RET_ERROR;
+  }
+
+  if (sent != (ssize_t)sizeof(packet)) {
+    RUDP_IP_CHANNEL_WARN("Partial control packet send %d/%d type=%d", (int)sent, (int)sizeof(packet), packet_type);
+    return NETWORK_CHANNEL_RET_RETRY;
   }
 
   return NETWORK_CHANNEL_RET_OK;
@@ -383,6 +427,8 @@ static void _RUdpIpChannel_reset_handshake_state(RUdpIpChannel* self) {
   self->handshake_ready_acked = false;
   self->handshake_last_hello_send_time_ms = 0;
   self->handshake_last_ready_send_time_ms = 0;
+  self->handshake_hello_retransmit_delay_ms = RUDP_RETRANSMIT_TIMEOUT_MS;
+  self->handshake_ready_retransmit_delay_ms = RUDP_RETRANSMIT_TIMEOUT_MS;
   self->handshake_hello_retry_count = 0;
   self->handshake_ready_retry_count = 0;
 }
@@ -396,7 +442,10 @@ static int _RUdpIpChannel_send_client_hello(RUdpIpChannel* self) {
   self->handshake_hello_sent = true;
   self->handshake_last_hello_send_time_ms = k_uptime_get();
   self->handshake_hello_retry_count++;
-  RUDP_IP_CHANNEL_DEBUG("Sent HELLO (%d)", self->handshake_hello_retry_count);
+  self->handshake_hello_retransmit_delay_ms =
+      _RUdpIpChannel_jittered_retransmit_delay_ms(RUDP_PACKET_TYPE_HELLO, self->handshake_hello_retry_count);
+  RUDP_IP_CHANNEL_DEBUG("Sent HELLO (%d), next retry in %d ms", self->handshake_hello_retry_count,
+                        self->handshake_hello_retransmit_delay_ms);
   return NETWORK_CHANNEL_RET_OK;
 }
 
@@ -409,7 +458,10 @@ static int _RUdpIpChannel_send_client_ready(RUdpIpChannel* self) {
   self->handshake_ready_sent = true;
   self->handshake_last_ready_send_time_ms = k_uptime_get();
   self->handshake_ready_retry_count++;
-  RUDP_IP_CHANNEL_DEBUG("Sent READY (%d)", self->handshake_ready_retry_count);
+  self->handshake_ready_retransmit_delay_ms =
+      _RUdpIpChannel_jittered_retransmit_delay_ms(RUDP_PACKET_TYPE_READY, self->handshake_ready_retry_count);
+  RUDP_IP_CHANNEL_DEBUG("Sent READY (%d), next retry in %d ms", self->handshake_ready_retry_count,
+                        self->handshake_ready_retransmit_delay_ms);
   return NETWORK_CHANNEL_RET_OK;
 }
 
@@ -427,38 +479,59 @@ static void _RUdpIpChannel_dispatch_received_packet(RUdpIpChannel* self, int pac
   int uid = _RUdpIpChannel_protocol_extract_uid(self->read_buffer, bytes_received);
 
   switch (packet_type) {
-  case RUDP_PACKET_TYPE_HELLO:
-    if (!ALLOW_RECONNECTION && _RUdpIpChannel_get_state(self) == NETWORK_CHANNEL_STATE_CONNECTED) {
-      RUDP_IP_CHANNEL_WARN("Received HELLO while already connected, ignoring due to ALLOW_RECONNECTION=0");
+  case RUDP_PACKET_TYPE_HELLO: {
+    NetworkChannelState state = _RUdpIpChannel_get_state(self);
+
+    RUDP_IP_CHANNEL_DEBUG("Received HELLO");
+    if (self->is_client_role) {
+      RUDP_IP_CHANNEL_DEBUG("Ignoring HELLO in client role");
       return;
     }
 
-    RUDP_IP_CHANNEL_DEBUG("Received HELLO");
-    if (_RUdpIpChannel_send_control_packet(self, RUDP_PACKET_TYPE_HELLO_ACK, 0, 0) != NETWORK_CHANNEL_RET_OK) {
+    if (!ALLOW_RECONNECTION && state != NETWORK_CHANNEL_STATE_CONNECTION_IN_PROGRESS &&
+        state != NETWORK_CHANNEL_STATE_CONNECTED) {
+      RUDP_IP_CHANNEL_WARN("Received HELLO while in state %s, ignoring",
+                           NetworkChannel_state_to_string(state));
+      return;
+    }
+
+    int ret = _RUdpIpChannel_send_control_packet(self, RUDP_PACKET_TYPE_HELLO_ACK, 0, 0);
+    if (ret == NETWORK_CHANNEL_RET_ERROR) {
       _RUdpIpChannel_update_state(self, NETWORK_CHANNEL_STATE_LOST_CONNECTION);
     }
     return;
+  }
 
-  case RUDP_PACKET_TYPE_HELLO_ACK:
-    if (!ALLOW_RECONNECTION && _RUdpIpChannel_get_state(self) == NETWORK_CHANNEL_STATE_CONNECTED) {
-      RUDP_IP_CHANNEL_WARN("Received HELLO_ACK while already connected, ignoring due to ALLOW_RECONNECTION=0");
-      return;
-    }
+  case RUDP_PACKET_TYPE_HELLO_ACK: {
+    NetworkChannelState state = _RUdpIpChannel_get_state(self);
 
     RUDP_IP_CHANNEL_DEBUG("Received HELLO_ACK");
-    if (self->is_client_role) {
-      self->handshake_hello_acked = true;
-      if (_RUdpIpChannel_send_client_ready(self) != NETWORK_CHANNEL_RET_OK) {
-        _RUdpIpChannel_update_state(self, NETWORK_CHANNEL_STATE_LOST_CONNECTION);
-      }
-    }
-    return;
-
-  case RUDP_PACKET_TYPE_READY:
-    if (!ALLOW_RECONNECTION && _RUdpIpChannel_get_state(self) == NETWORK_CHANNEL_STATE_CONNECTED) {
-      RUDP_IP_CHANNEL_WARN("Received READY while already connected, ignoring due to ALLOW_RECONNECTION=0");
+    if (!self->is_client_role) {
+      RUDP_IP_CHANNEL_DEBUG("Ignoring HELLO_ACK in server role");
       return;
     }
+
+    if (state == NETWORK_CHANNEL_STATE_CONNECTED) {
+      RUDP_IP_CHANNEL_DEBUG("Ignoring duplicate HELLO_ACK while already connected");
+      return;
+    }
+
+    if (!ALLOW_RECONNECTION && state != NETWORK_CHANNEL_STATE_CONNECTION_IN_PROGRESS) {
+      RUDP_IP_CHANNEL_WARN("Received HELLO_ACK while in state %s, ignoring",
+                           NetworkChannel_state_to_string(state));
+      return;
+    }
+
+    self->handshake_hello_acked = true;
+    int ret = _RUdpIpChannel_send_client_ready(self);
+    if (ret == NETWORK_CHANNEL_RET_ERROR) {
+      _RUdpIpChannel_update_state(self, NETWORK_CHANNEL_STATE_LOST_CONNECTION);
+    }
+    return;
+  }
+
+  case RUDP_PACKET_TYPE_READY: {
+    NetworkChannelState state = _RUdpIpChannel_get_state(self);
 
     RUDP_IP_CHANNEL_DEBUG("Received READY");
     if (self->is_client_role) {
@@ -466,39 +539,53 @@ static void _RUdpIpChannel_dispatch_received_packet(RUdpIpChannel* self, int pac
       return;
     }
 
-    if (_RUdpIpChannel_send_control_packet(self, RUDP_PACKET_TYPE_READY_ACK, 0, 0) != NETWORK_CHANNEL_RET_OK) {
+    if (!ALLOW_RECONNECTION && state != NETWORK_CHANNEL_STATE_CONNECTION_IN_PROGRESS &&
+        state != NETWORK_CHANNEL_STATE_CONNECTED) {
+      RUDP_IP_CHANNEL_WARN("Received READY while in state %s, ignoring",
+                           NetworkChannel_state_to_string(state));
+      return;
+    }
+
+    int ret = _RUdpIpChannel_send_control_packet(self, RUDP_PACKET_TYPE_READY_ACK, 0, 0);
+    if (ret == NETWORK_CHANNEL_RET_ERROR) {
       _RUdpIpChannel_update_state(self, NETWORK_CHANNEL_STATE_LOST_CONNECTION);
       return;
     }
 
-    if (_RUdpIpChannel_get_state(self) == NETWORK_CHANNEL_STATE_CONNECTION_IN_PROGRESS) {
+    if (state == NETWORK_CHANNEL_STATE_CONNECTION_IN_PROGRESS) {
       RUDP_IP_CHANNEL_INFO("RUDP handshake complete (server role)");
       _RUdpIpChannel_update_state(self, NETWORK_CHANNEL_STATE_CONNECTED);
     }
     return;
+  }
 
-  case RUDP_PACKET_TYPE_READY_ACK:
-    if (!ALLOW_RECONNECTION && _RUdpIpChannel_get_state(self) == NETWORK_CHANNEL_STATE_CONNECTED) {
-      RUDP_IP_CHANNEL_WARN("Received READY while already connected, ignoring due to ALLOW_RECONNECTION=0");
+  case RUDP_PACKET_TYPE_READY_ACK: {
+    NetworkChannelState state = _RUdpIpChannel_get_state(self);
+
+    RUDP_IP_CHANNEL_DEBUG("Received READY_ACK");
+    if (!self->is_client_role) {
+      RUDP_IP_CHANNEL_DEBUG("Ignoring READY_ACK in server role");
       return;
     }
 
-    RUDP_IP_CHANNEL_DEBUG("Received READY_ACK");
-    if (self->is_client_role) {
-      self->handshake_ready_acked = true;
-      // TODO: Right now, when we think we're connected and receive unexpected handshake messages, we answer them as if
-      // we're still in the handshake. This is to allow the handshake to complete even if some messages are lost.
-      // What's missing is that, once the handshake is done, we should adjust our uid counters and pending packet uids
-      // because the connection reset. Right now, on connection loss, the sender will keep trying to send pending
-      // packets with their old UIDs, and the receiver will drop them because it thinks those UIDs are too far in the
-      // future.
-      // Because of this, while we do have a reconnection mechanism, it serves no practical purpose.
-      if (_RUdpIpChannel_get_state(self) == NETWORK_CHANNEL_STATE_CONNECTION_IN_PROGRESS) {
-        RUDP_IP_CHANNEL_INFO("RUDP handshake complete (client role)");
-        _RUdpIpChannel_update_state(self, NETWORK_CHANNEL_STATE_CONNECTED);
-      }
+    if (state == NETWORK_CHANNEL_STATE_CONNECTED) {
+      RUDP_IP_CHANNEL_DEBUG("Ignoring duplicate READY_ACK while already connected");
+      return;
+    }
+
+    if (!ALLOW_RECONNECTION && state != NETWORK_CHANNEL_STATE_CONNECTION_IN_PROGRESS) {
+      RUDP_IP_CHANNEL_WARN("Received READY_ACK while in state %s, ignoring",
+                           NetworkChannel_state_to_string(state));
+      return;
+    }
+
+    self->handshake_ready_acked = true;
+    if (state == NETWORK_CHANNEL_STATE_CONNECTION_IN_PROGRESS) {
+      RUDP_IP_CHANNEL_INFO("RUDP handshake complete (client role)");
+      _RUdpIpChannel_update_state(self, NETWORK_CHANNEL_STATE_CONNECTED);
     }
     return;
+  }
 
   case RUDP_PACKET_TYPE_ACK:
     _RUdpIpChannel_handle_received_ack(self, uid);
@@ -1245,22 +1332,31 @@ static void _RUdpIpChannel_handle_connection_in_progress(RUdpIpChannel* self) {
     int64_t now = k_uptime_get();
     if (!self->handshake_hello_acked) {
       if (!self->handshake_hello_sent ||
-          (now - self->handshake_last_hello_send_time_ms) >= RUDP_RETRANSMIT_TIMEOUT_MS) {
-        if (_RUdpIpChannel_send_client_hello(self) != NETWORK_CHANNEL_RET_OK) {
+          (now - self->handshake_last_hello_send_time_ms) >= self->handshake_hello_retransmit_delay_ms) {
+        int ret = _RUdpIpChannel_send_client_hello(self);
+        if (ret == NETWORK_CHANNEL_RET_ERROR) {
           _RUdpIpChannel_update_state(self, NETWORK_CHANNEL_STATE_LOST_CONNECTION);
           return;
         }
       }
     } else if (!self->handshake_ready_acked) {
       if (!self->handshake_ready_sent ||
-          (now - self->handshake_last_ready_send_time_ms) >= RUDP_RETRANSMIT_TIMEOUT_MS) {
-        if (_RUdpIpChannel_send_client_ready(self) != NETWORK_CHANNEL_RET_OK) {
+          (now - self->handshake_last_ready_send_time_ms) >= self->handshake_ready_retransmit_delay_ms) {
+        int ret = _RUdpIpChannel_send_client_ready(self);
+        if (ret == NETWORK_CHANNEL_RET_ERROR) {
           _RUdpIpChannel_update_state(self, NETWORK_CHANNEL_STATE_LOST_CONNECTION);
           return;
         }
       }
     }
   }
+
+  int recv_timeout_ms = _RUdpIpChannel_compute_handshake_recv_timeout_ms(self, k_uptime_get());
+#if defined(CONFIG_NET_CONTEXT_RCVTIMEO) && (CONFIG_NET_CONTEXT_RCVTIMEO == 1)
+  (void)_RUdpIpChannel_set_socket_recv_timeout_ms(self, recv_timeout_ms, false);
+#else
+  (void)recv_timeout_ms;
+#endif
 
   ssize_t bytes_received = recv(self->fd, self->read_buffer, sizeof(self->read_buffer), 0);
   if (bytes_received < 0) {
