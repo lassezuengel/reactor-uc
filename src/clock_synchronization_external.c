@@ -93,6 +93,14 @@ static bool ClockSynchronizationExternal_schedule_next_sync(ClockSynchronization
     // We stepped the clock by the offset, so the schedule time in the local time domain
     // is now correct with respect to the reference time domain!
     schedule_time_ms = next_sync_run_ms - clock_offset_ms;
+
+    interval_t offset_abs = offset_ns > 0 ? offset_ns : -offset_ns;
+    if(offset_abs > MSEC(100)) {
+      LF_WARN(CLOCK_SYNC_EXT, "Large (possibly initial) clock offset applied: %" PRId64 " ms, informing scheduler", clock_offset_ms);
+      // TODO: Correct sign? Also, doesn't step_clock need the offset relative to synchronized time?
+      self->env->scheduler->step_clock(self->env->scheduler, -offset_ns);
+      self->env->platform->notify(self->env->platform);
+    }
   }
 
   // Schedule the next sync event at the time returned by the API (reference time domain).

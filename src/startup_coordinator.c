@@ -289,7 +289,17 @@ static void StartupCoordinator_handle_start_time_proposal(StartupCoordinator* se
       // Calculate and broadcast our own initial proposal.
       instant_t my_proposal;
       if ((env_fed->do_clock_sync && env_fed->clock_sync->is_grandmaster) || !env_fed->do_clock_sync) {
-        my_proposal = self->env->get_physical_time(self->env) + (MSEC(100) * self->longest_path);
+        // In lossy environments, retransmissions and delayed message deliveries can cause the negotiated
+        // start time to become stale (i.e., the current physical time has already passed the negotiated
+        // start time by the time it is received by some neighbors). To mitigate this, we set our initial
+        // proposal to be some time in the future. For lossy networks and high retransmission delays, we
+        // use something as big as 1 second per hop.
+        //
+        // TODO: The magic number should definitely be configurable. When using higher retransmission timeouts
+        // and/or more lossy links, the choice of the initial proposal becomes more critical and the federation
+        // might fail to startup (see `Environment_schedule_startups`). If we choose a number too high, though,
+        // we will have unnecessarily long startup times on good networks.
+        my_proposal = self->env->get_physical_time(self->env) + (MSEC(1000) * self->longest_path);
       } else {
         my_proposal = NEVER;
       }
