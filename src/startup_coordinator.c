@@ -523,7 +523,7 @@ static void StartupCoordinator_handle_system_event(SystemEventHandler* _self, Sy
   StartupEvent* payload = (StartupEvent*)event->super.payload;
   switch (payload->msg.which_message) {
   case StartupCoordination_startup_handshake_request_tag:
-    LF_INFO(FED, "Handle: Handshake Reqeust Tag System Event");
+    LF_INFO(FED, "Handle: Handshake Request Tag System Event");
     StartupCoordinator_handle_startup_handshake_request(self, payload);
     break;
 
@@ -563,7 +563,7 @@ static void StartupCoordinator_handle_system_event(SystemEventHandler* _self, Sy
 
 void StartupCoordinator_start(StartupCoordinator* self) {
   // Default behavior when clock-sync is enabled: start with a handshake request.
-  StartupCoordinator_schedule_system_self_event(self, self->env->get_physical_time(self->env) + MSEC(250),
+  StartupCoordinator_schedule_system_self_event(self, self->env->get_physical_time(self->env) + MSEC(16000),
                                                 StartupCoordination_startup_handshake_request_tag);
 }
 

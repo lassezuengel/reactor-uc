@@ -149,7 +149,9 @@ void ClockSynchronizationExternal_ctor(ClockSynchronizationExternal* self, Envir
   }
   LF_INFO(CLOCK_SYNC_EXT, "Initialized external clock sync mechanism");
 
-  // Schedule the first sync event immediately to kick off the clock synchronization process.
-  ClockSynchronizationExternal_schedule_system_event(self, self->env->get_physical_time(self->env),
+  // Schedule the first sync event to kick off the clock synchronization process.
+  // We use a fixed delay of 5 seconds here to give the program some time to start up before the first sync,
+  // but this could be made configurable.
+  ClockSynchronizationExternal_schedule_system_event(self, self->env->get_physical_time(self->env) + MSEC(3000),
                                                      EXTERNAL_CLOCK_SYNC_EVENT_SYNC);
 }
