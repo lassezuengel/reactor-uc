@@ -80,6 +80,13 @@ static bool ClockSynchronizationExternal_schedule_next_sync(ClockSynchronization
   }
 
   int64_t schedule_time_ms = next_sync_run_ms;
+  if(!self->is_grandmaster) {
+    // For non-grandmaster nodes, convert local schedule time to reference time domain.
+    // We stepped the clock by the offset, so the schedule time in the local time domain
+    // is now correct with respect to the reference time domain!
+    schedule_time_ms = next_sync_run_ms - clock_offset_ms;
+  }
+
   if (!self->is_grandmaster && ret == 0) {
     // The sync run succeeded and we're not the grandmaster. Update the clock
     // with the offset returned by the API (offset is local - reference).
@@ -88,11 +95,6 @@ static bool ClockSynchronizationExternal_schedule_next_sync(ClockSynchronization
     instant_t corrected = raw_now - offset_ns;
     LF_INFO(CLOCK_SYNC_EXT, "Stepping clock by offset %" PRId64 " ms", clock_offset_ms);
     env_fed->clock.set_time(&env_fed->clock, corrected);
-
-    // For non-grandmaster nodes, convert local schedule time to reference time domain.
-    // We stepped the clock by the offset, so the schedule time in the local time domain
-    // is now correct with respect to the reference time domain!
-    schedule_time_ms = next_sync_run_ms - clock_offset_ms;
 
     interval_t offset_abs = offset_ns > 0 ? offset_ns : -offset_ns;
     if(offset_abs > MSEC(100)) {
