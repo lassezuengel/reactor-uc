@@ -718,10 +718,10 @@ typedef struct FederatedInputConnection FederatedInputConnection;
     ReactionQueue_ctor(&reaction_queue, (Reaction**)reactions, level_size, (NumReactions));                            \
     DynamicScheduler_ctor(&scheduler, _lf_environment, &event_queue, &system_event_queue, &reaction_queue, (Timeout),  \
                           (KeepAlive));                                                                                \
-    FederatedEnvironment_ctor(                                                                                         \
-      &env, (Reactor*)&main_reactor, &scheduler.super, false, (FederatedConnectionBundle**)&main_reactor._bundles,   \
-      (NumBundles), &main_reactor.startup_coordinator.super,                                                         \
-      (DoClockSync) ? &main_reactor.clock_sync.super : NULL, (ExternalClockSync));                                   \
+    FederatedEnvironment_ctor(&env, (Reactor*)&main_reactor, &scheduler.super, false,                                  \
+                              (FederatedConnectionBundle**)&main_reactor._bundles, (NumBundles),                       \
+                              &main_reactor.startup_coordinator.super,                                                 \
+                              (DoClockSync) ? &main_reactor.clock_sync.super : NULL, (ExternalClockSync));             \
     FederateName##_ctor(&main_reactor, NULL, _lf_environment);                                                         \
     env.net_bundles_size = (NumBundles);                                                                               \
     env.net_bundles = (FederatedConnectionBundle**)&main_reactor._bundles;                                             \

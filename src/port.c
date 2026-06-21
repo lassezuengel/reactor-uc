@@ -31,8 +31,7 @@ void Port_prepare(Trigger* _self, Event* event) {
   for (size_t i = 0; i < self->effects.size; i++) {
     lf_ret_t add_ret = sched->add_to_reaction_queue(sched, self->effects.reactions[i]);
     if (add_ret != LF_OK) {
-      LF_ERR(TRIG,
-             "Failed to add reaction %p to queue from port %p at intended_tag=" PRINTF_TAG " (ret=%d)",
+      LF_ERR(TRIG, "Failed to add reaction %p to queue from port %p at intended_tag=" PRINTF_TAG " (ret=%d)",
              self->effects.reactions[i], self, self->intended_tag, add_ret);
     }
     validaten(add_ret);

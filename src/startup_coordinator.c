@@ -335,14 +335,12 @@ static void StartupCoordinator_handle_start_time_proposal(StartupCoordinator* se
       // Handle duplicates and out-of-order proposals gracefully on lossy links.
       size_t* last_step = &self->neighbor_state[payload->neighbor_index].start_time_proposals_received;
       if (step <= *last_step) {
-        LF_WARN(FED,
-                "Ignoring duplicate/stale start time proposal from federate %d: step=%zu last_step=%zu",
+        LF_WARN(FED, "Ignoring duplicate/stale start time proposal from federate %d: step=%zu last_step=%zu",
                 payload->neighbor_index, step, *last_step);
         break;
       }
       if (step > (*last_step + 1)) {
-        LF_WARN(FED,
-                "Ignoring out-of-order start time proposal from federate %d: step=%zu expected=%zu",
+        LF_WARN(FED, "Ignoring out-of-order start time proposal from federate %d: step=%zu expected=%zu",
                 payload->neighbor_index, step, *last_step + 1);
         break;
       }

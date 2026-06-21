@@ -4,9 +4,9 @@ import org.lflang.AttributeUtils
 import org.lflang.lf.Reactor
 
 class UcExternalClockSyncGenerator(
-  private val reactor: Reactor,
-  private val currentFederate: UcFederate? = null,
-  private val allFederates: List<UcFederate> = emptyList()
+    private val reactor: Reactor,
+    private val currentFederate: UcFederate? = null,
+    private val allFederates: List<UcFederate> = emptyList()
 ) {
 
   companion object {
@@ -27,29 +27,31 @@ class UcExternalClockSyncGenerator(
     return !modulePath.isNullOrBlank()
   }
 
-    fun generateModuleInclude() = if (enabled()) "#include ${modulePath}" else ""
+  fun generateModuleInclude() = if (enabled()) "#include ${modulePath}" else ""
 
   fun generateApiStruct() =
       if (enabled())
-        "static const ExternalClockSyncApi ${apiName} = { .init = lf_clock_sync_init, .schedule = lf_clock_sync_schedule };"
+          "static const ExternalClockSyncApi ${apiName} = { .init = lf_clock_sync_init, .schedule = lf_clock_sync_schedule };"
       else ""
 
-    fun generateApiConfig() =
+  fun generateApiConfig() =
       if (enabled())
-        "static const bool external_clock_sync_is_grandmaster = ${isGrandmaster};\n" +
-          "static const int external_clock_sync_federate_id = ${federateId};"
+          "static const bool external_clock_sync_is_grandmaster = ${isGrandmaster};\n" +
+              "static const int external_clock_sync_federate_id = ${federateId};"
       else ""
 
   fun generateSelfStruct() =
-      if (enabled()) "LF_DEFINE_EXTERNAL_CLOCK_SYNC_STRUCT(Federate, ${numSystemEventsConst})" else ""
+      if (enabled()) "LF_DEFINE_EXTERNAL_CLOCK_SYNC_STRUCT(Federate, ${numSystemEventsConst})"
+      else ""
 
   fun generateCtor() =
       if (enabled())
-        "LF_DEFINE_EXTERNAL_CLOCK_SYNC_CTOR(Federate, ${numSystemEventsConst}, ${apiName}, external_clock_sync_is_grandmaster, external_clock_sync_federate_id);"
+          "LF_DEFINE_EXTERNAL_CLOCK_SYNC_CTOR(Federate, ${numSystemEventsConst}, ${apiName}, external_clock_sync_is_grandmaster, external_clock_sync_federate_id);"
       else ""
 
   fun generateFederateStructField() =
       if (enabled()) "FederateExternalClockSync ${instName};" else ""
 
-  fun generateFederateCtorCode() = if (enabled()) "LF_INITIALIZE_EXTERNAL_CLOCK_SYNC(Federate);" else ""
+  fun generateFederateCtorCode() =
+      if (enabled()) "LF_INITIALIZE_EXTERNAL_CLOCK_SYNC(Federate);" else ""
 }

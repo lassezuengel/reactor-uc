@@ -490,8 +490,7 @@ static void _RUdpIpChannel_dispatch_received_packet(RUdpIpChannel* self, int pac
 
     if (!ALLOW_RECONNECTION && state != NETWORK_CHANNEL_STATE_CONNECTION_IN_PROGRESS &&
         state != NETWORK_CHANNEL_STATE_CONNECTED) {
-      RUDP_IP_CHANNEL_WARN("Received HELLO while in state %s, ignoring",
-                           NetworkChannel_state_to_string(state));
+      RUDP_IP_CHANNEL_WARN("Received HELLO while in state %s, ignoring", NetworkChannel_state_to_string(state));
       return;
     }
 
@@ -517,8 +516,7 @@ static void _RUdpIpChannel_dispatch_received_packet(RUdpIpChannel* self, int pac
     }
 
     if (!ALLOW_RECONNECTION && state != NETWORK_CHANNEL_STATE_CONNECTION_IN_PROGRESS) {
-      RUDP_IP_CHANNEL_WARN("Received HELLO_ACK while in state %s, ignoring",
-                           NetworkChannel_state_to_string(state));
+      RUDP_IP_CHANNEL_WARN("Received HELLO_ACK while in state %s, ignoring", NetworkChannel_state_to_string(state));
       return;
     }
 
@@ -541,8 +539,7 @@ static void _RUdpIpChannel_dispatch_received_packet(RUdpIpChannel* self, int pac
 
     if (!ALLOW_RECONNECTION && state != NETWORK_CHANNEL_STATE_CONNECTION_IN_PROGRESS &&
         state != NETWORK_CHANNEL_STATE_CONNECTED) {
-      RUDP_IP_CHANNEL_WARN("Received READY while in state %s, ignoring",
-                           NetworkChannel_state_to_string(state));
+      RUDP_IP_CHANNEL_WARN("Received READY while in state %s, ignoring", NetworkChannel_state_to_string(state));
       return;
     }
 
@@ -574,8 +571,7 @@ static void _RUdpIpChannel_dispatch_received_packet(RUdpIpChannel* self, int pac
     }
 
     if (!ALLOW_RECONNECTION && state != NETWORK_CHANNEL_STATE_CONNECTION_IN_PROGRESS) {
-      RUDP_IP_CHANNEL_WARN("Received READY_ACK while in state %s, ignoring",
-                           NetworkChannel_state_to_string(state));
+      RUDP_IP_CHANNEL_WARN("Received READY_ACK while in state %s, ignoring", NetworkChannel_state_to_string(state));
       return;
     }
 
@@ -813,15 +809,16 @@ static int _RUdpIpChannel_retransmit_outgoing_packet(RUdpIpChannel* self, int bu
   if (triggered_by_timeout) {
     RUDP_IP_CHANNEL_DEBUG("Retransmitting packet uid=%d after %d ms due to timeout (retry %d/%d)", uid, (int)elapsed_ms,
                           retry_attempt, RUDP_MAX_RETRIES);
-    if(retry_attempt % 10 == 0) {
-      RUDP_IP_CHANNEL_STAT("Retransmitting packet uid=%d after %d ms due to timeout (retry %d/%d)", uid, (int)elapsed_ms,
-                           retry_attempt, RUDP_MAX_RETRIES);
+    if (retry_attempt % 10 == 0) {
+      RUDP_IP_CHANNEL_STAT("Retransmitting packet uid=%d after %d ms due to timeout (retry %d/%d)", uid,
+                           (int)elapsed_ms, retry_attempt, RUDP_MAX_RETRIES);
     }
   } else {
-    RUDP_IP_CHANNEL_DEBUG("Retransmitting packet uid=%d after %d ms due to HACK request (requester uid=%d, retry %d/%d)", uid,
-                          (int)elapsed_ms, hack_request_uid, retry_attempt, RUDP_MAX_RETRIES);
-    RUDP_IP_CHANNEL_STAT("Retransmitting packet uid=%d after %d ms due to HACK request (requester uid=%d, retry %d/%d)", uid,
-                         (int)elapsed_ms, hack_request_uid, retry_attempt, RUDP_MAX_RETRIES);
+    RUDP_IP_CHANNEL_DEBUG(
+        "Retransmitting packet uid=%d after %d ms due to HACK request (requester uid=%d, retry %d/%d)", uid,
+        (int)elapsed_ms, hack_request_uid, retry_attempt, RUDP_MAX_RETRIES);
+    RUDP_IP_CHANNEL_STAT("Retransmitting packet uid=%d after %d ms due to HACK request (requester uid=%d, retry %d/%d)",
+                         uid, (int)elapsed_ms, hack_request_uid, retry_attempt, RUDP_MAX_RETRIES);
   }
 
   int send_ret = _RUdpIpChannel_send_outgoing_packet(self, buffer_idx);
@@ -893,7 +890,8 @@ static void _RUdpIpChannel_handle_retransmissions(RUdpIpChannel* self) {
 static int _RUdpIpChannel_handle_outgoing_ack(RUdpIpChannel* self, int uid, int ack_packet_type) {
   assert(ack_packet_type == RUDP_PACKET_TYPE_ACK || ack_packet_type == RUDP_PACKET_TYPE_FACK);
 
-  RUDP_IP_CHANNEL_DEBUG("Sending %s for received packet; uid=%d", ack_packet_type == RUDP_PACKET_TYPE_ACK ? "ACK" : "FACK", uid);
+  RUDP_IP_CHANNEL_DEBUG("Sending %s for received packet; uid=%d",
+                        ack_packet_type == RUDP_PACKET_TYPE_ACK ? "ACK" : "FACK", uid);
   return _RUdpIpChannel_send_control_packet(self, ack_packet_type, uid, 0);
 }
 

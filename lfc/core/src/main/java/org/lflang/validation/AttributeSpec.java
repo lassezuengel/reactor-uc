@@ -351,11 +351,10 @@ public class AttributeSpec {
                 new AttrParamSpec("max_adj", AttrParamType.INT, true),
                 new AttrParamSpec("kp", AttrParamType.FLOAT, true),
                 new AttrParamSpec("ki", AttrParamType.FLOAT, true),
-                new AttrParamSpec("dedicated", AttrParamType.BOOLEAN, true)
-              )));
+                new AttrParamSpec("dedicated", AttrParamType.BOOLEAN, true))));
     // @external_clock_sync(module="path")
     ATTRIBUTE_SPECS_BY_NAME.put(
-      "external_clock_sync",
-      new AttributeSpec(List.of(new AttrParamSpec("module", AttrParamType.STRING, false))));
+        "external_clock_sync",
+        new AttributeSpec(List.of(new AttrParamSpec("module", AttrParamType.STRING, false))));
   }
 }

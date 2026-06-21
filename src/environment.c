@@ -13,7 +13,7 @@ void Environment_schedule_startups(const Environment* self, const tag_t start_ta
     Event event = EVENT_INIT(start_tag, &self->startup->super, NULL);
     LF_INFO(FED, "Self: %p Scheduler: %p", self, self->scheduler);
     lf_ret_t ret = self->scheduler->schedule_at(self->scheduler, &event);
-    if(ret != LF_OK) {
+    if (ret != LF_OK) {
       LF_ERR(FED, "Failed to schedule startup reactions at tag " PRINTF_TAG " (ret=%d)", start_tag, ret);
     }
     validate(ret == LF_OK);
@@ -29,7 +29,7 @@ void Environment_schedule_timers(Environment* self, const Reactor* reactor, cons
       tag_t tag = {.time = start_tag.time + timer->offset, .microstep = start_tag.microstep};
       Event event = EVENT_INIT(tag, trigger, NULL);
       ret = self->scheduler->schedule_at(self->scheduler, &event);
-      if(ret != LF_OK) {
+      if (ret != LF_OK) {
         LF_ERR(FED, "Failed to schedule timer %p at tag " PRINTF_TAG " (ret=%d)", timer, tag, ret);
       }
       validate(ret == LF_OK);

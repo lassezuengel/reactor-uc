@@ -1,14 +1,3 @@
-/**
- * TODO: Currently, glossy followers will only initiate fine-grained glossy "searches"
- * after three consecutive misses. This, of course, means that if a follower isn't
- * synchronized with the grandmaster at startup, it will take at least three (failed) sync
- * rounds before it initiates a search and has a much greater chance of successfully
- * synchronizing with the grandmaster. We should consider initiating a search immediately
- * at startup if the follower is not synchronized, and perhaps even hold the program at
- * startup (glossy blocks federate execution), so that we can make sure that the program
- * will only start up with some notion of synchronization already in place.
- */
-
 #include "reactor-uc/clock_synchronization_external.h"
 
 #include "reactor-uc/environments/federated_environment.h"
@@ -102,8 +91,7 @@ static void ClockSynchronizationExternal_schedule_next_lf_driven_sync(ClockSynch
   // Schedule the next sync event at the time returned by the API (reference time domain).
   instant_t next_time = (instant_t)(schedule_time_ms) * (instant_t)1000000;
   int64_t now_ms = (int64_t)(self->env->get_physical_time(self->env) / 1000000);
-  LF_DEBUG(CLOCK_SYNC_EXT, "Scheduling at next time = %" PRId64 " ms (now = %" PRId64 " ms)", schedule_time_ms,
-           now_ms);
+  LF_DEBUG(CLOCK_SYNC_EXT, "Scheduling at next time = %" PRId64 " ms (now = %" PRId64 " ms)", schedule_time_ms, now_ms);
   ExternalClockSyncEvent payload = {.message_type = EXTERNAL_CLOCK_SYNC_EVENT_SYNC};
   ClockSynchronizationExternal_schedule_system_event(self, next_time, &payload);
 }
@@ -132,8 +120,7 @@ static void ClockSynchronizationExternal_apply_sync_result(ClockSynchronizationE
 
     interval_t offset_abs = offset_ns > 0 ? offset_ns : -offset_ns;
     if (offset_abs > MSEC(100)) {
-      LF_WARN(CLOCK_SYNC_EXT, "Large (possibly initial) clock offset applied: %" PRId64
-                             " ms, informing scheduler",
+      LF_WARN(CLOCK_SYNC_EXT, "Large (possibly initial) clock offset applied: %" PRId64 " ms, informing scheduler",
               clock_offset_ms);
       // TODO: Correct sign? Also, doesn't step_clock need the offset relative to synchronized time?
       self->env->scheduler->step_clock(self->env->scheduler, -offset_ns);
@@ -204,9 +191,9 @@ void ClockSynchronizationExternal_ctor(ClockSynchronizationExternal* self, Envir
                         payload_buf_capacity, EXTERNAL_CLOCK_SYNC_RESERVED_EVENTS);
 
   if (self->api && self->api->init) {
-    int ret = self->api->init(self->is_grandmaster, self->federate_id,
-                              ClockSynchronizationExternal_report_result_callback, self,
-                              &self->lf_drives_sync_schedule);
+    int ret =
+        self->api->init(self->is_grandmaster, self->federate_id, ClockSynchronizationExternal_report_result_callback,
+                        self, &self->lf_drives_sync_schedule);
     if (ret != 0) {
       LF_WARN(CLOCK_SYNC_EXT, "External clock sync init returned %d", ret);
     }

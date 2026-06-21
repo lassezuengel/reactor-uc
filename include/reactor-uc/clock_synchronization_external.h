@@ -57,8 +57,8 @@ typedef struct {
    *
    * The implementation should store @p result_callback and @p result_callback_user_data and call the callback whenever
    * a sync run completes. Set output parameter @p lf_drives_sync_schedule to true if reactor-uc should call schedule
-   * periodically using the callback's next_sync_run_ms value. Set it to false if the implementation drives its own timing
-   * and will call the result callback from its own thread, interrupt, or worker queue.
+   * periodically using the callback's next_sync_run_ms value. Set it to false if the implementation drives its own
+   * timing and will call the result callback from its own thread, interrupt, or worker queue.
    */
   int (*init)(bool grandmaster, int federate_id, ExternalClockSyncResultCallback result_callback,
               void* result_callback_user_data, bool* lf_drives_sync_schedule);
@@ -70,8 +70,8 @@ typedef struct {
    * completed run by invoking the callback passed to init. It may call the callback before schedule returns for a
    * synchronous implementation, or later from another execution context for an asynchronous implementation.
    *
-   * The return value indicates whether the run request itself was accepted. It is not the sync result; the sync result is
-   * passed to the callback as sync_status.
+   * The return value indicates whether the run request itself was accepted. It is not the sync result; the sync result
+   * is passed to the callback as sync_status.
    */
   int (*schedule)(void);
 } ExternalClockSyncApi;
@@ -82,7 +82,6 @@ typedef struct {
   int64_t next_sync_run_ms;
   int64_t clock_offset_ms;
 } ExternalClockSyncEvent;
-
 
 /**
  * @brief Clock synchronization module that uses an external API to perform clock synchronization.
