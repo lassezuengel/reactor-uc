@@ -1,3 +1,12 @@
+// TODO: As this module is pretty much a singleton, we probably don't need to pass opaque
+// `user_data` to the external implementation. Doesn't really hurt, though.
+// TODO: Currently, this external clock sync mechanism is applied to the whole federation.
+// This means that all federates have to be able to communicate and sync via the external mechanism,
+// which may not be the case in heterogeneous deployments where only a subset of federates have the
+// necessary connectivity (e.g., Glossy). We need to consider how to support partial deployment of
+// the external clock sync mechanism, where only a subset of federates use it and the others use either
+// yet another external clock sync mechanism or the LF-supplied mechanism.
+
 #ifndef REACTOR_UC_CLOCK_SYNCHRONIZATION_EXTERNAL_H
 #define REACTOR_UC_CLOCK_SYNCHRONIZATION_EXTERNAL_H
 
@@ -7,6 +16,28 @@
 #include "reactor-uc/tag.h"
 
 typedef struct Environment Environment;
+typedef struct ClockSynchronizationExternal ClockSynchronizationExternal;
+
+/**
+ * @brief Callback used by external clock synchronization implementations to report a completed sync run.
+ *
+ * The callback may be invoked synchronously from ExternalClockSyncApi.schedule or asynchronously
+ * from another thread, interrupt handler, or worker queue, depending on the platform and external
+ * implementation. The callback only schedules a reactor-uc system event. Clock stepping and scheduler
+ * adjustment are performed later from the runtime context.
+ *
+ * @param user_data Opaque pointer passed to `ExternalClockSyncApi.init`.
+ * @param sync_status Result of the completed sync run. Use 0 for success. Non-zero values are logged and do not
+ *                    apply a clock offset.
+ * @param next_sync_run_ms Absolute time in milliseconds for the next sync run. This is used only when the
+ *                         implementation lets reactor-uc drive the sync schedule. An implementation that drives
+ *                         its own schedule can ignore this (pass an arbitrary value such as @ref @c NEVER or 0)
+ *                         and schedule the next run independently.
+ * @param clock_offset_ms Clock offset in milliseconds. For non-grandmasters, a successful run interprets this as
+ *                        local time minus reference time.
+ */
+typedef void (*ExternalClockSyncResultCallback)(void* user_data, int sync_status, int64_t next_sync_run_ms,
+                                                int64_t clock_offset_ms);
 
 /**
  * @brief API that the external clock synchronization mechanism needs to implement.
@@ -21,41 +52,54 @@ typedef struct Environment Environment;
  * into the LF federation structure.
  */
 typedef struct {
-  // Initialize the external clock synchronization mechanism. The parameters are passed to
-  // the API implementation and may be used to configure it.
-  int (*init)(bool grandmaster, int federate_id);
-  // Schedule the next clock synchronization event. The API implementation should compute the next time to run the sync
-  // and the clock offset to apply (if this is not the grandmaster) and return them through the output parameters.
-  // The return value should be used to indicate whether the sync was successful (0) or not (<0).
-  // If the schedule function returns a non-zero value, a warning will be logged, but the program will continue to run
-  // and attempt to schedule the next sync event at the next scheduled sync time.
-  //
-  // The `next_sync_run_ms` is always expected to be mutated to the next scheduled sync time, even if the schedule function
-  // returns a non-zero value, tand the `clock_offset_ms` is expected to be mutated to the clock offset to apply for the next
-  // sync if the call succeeded (returned 0).
-  int (*schedule)(int64_t* next_sync_run_ms, int64_t* clock_offset_ms);
+  /**
+   * @brief Initialize the external clock synchronization mechanism.
+   *
+   * The implementation should store @p result_callback and @p result_callback_user_data and call the callback whenever
+   * a sync run completes. Set output parameter @p lf_drives_sync_schedule to true if reactor-uc should call schedule
+   * periodically using the callback's next_sync_run_ms value. Set it to false if the implementation drives its own timing
+   * and will call the result callback from its own thread, interrupt, or worker queue.
+   */
+  int (*init)(bool grandmaster, int federate_id, ExternalClockSyncResultCallback result_callback,
+              void* result_callback_user_data, bool* lf_drives_sync_schedule);
+
+  /**
+   * @brief Request one clock synchronization run.
+   *
+   * reactor-uc calls this only when lf_drives_sync_schedule was set to true by init. The implementation must report the
+   * completed run by invoking the callback passed to init. It may call the callback before schedule returns for a
+   * synchronous implementation, or later from another execution context for an asynchronous implementation.
+   *
+   * The return value indicates whether the run request itself was accepted. It is not the sync result; the sync result is
+   * passed to the callback as sync_status.
+   */
+  int (*schedule)(void);
 } ExternalClockSyncApi;
 
 typedef struct {
   int message_type;
+  int sync_status;
+  int64_t next_sync_run_ms;
+  int64_t clock_offset_ms;
 } ExternalClockSyncEvent;
 
 
 /**
  * @brief Clock synchronization module that uses an external API to perform clock synchronization.
  *
- * This module is a normal system event handler, which schedules its own events to perform clock
- * synchronization at the times determined by the API. When the scheduled event is handled, it
- * calls the API's schedule function to perform one round of clock synchronization and schedule
- * the next sync event.
+ * This module is a normal system event handler. If the external API lets reactor-uc drive the
+ * schedule, the handler requests sync runs at the times reported by the API callback. Completion
+ * is always reported asynchronously through ExternalClockSyncResultCallback and applied later from
+ * the runtime context.
  */
-typedef struct ClockSynchronizationExternal {
+struct ClockSynchronizationExternal {
   SystemEventHandler super;
   Environment* env;
   const ExternalClockSyncApi* api;
   bool is_grandmaster;
+  bool lf_drives_sync_schedule;
   int federate_id;
-} ClockSynchronizationExternal;
+};
 
 void ClockSynchronizationExternal_ctor(ClockSynchronizationExternal* self, Environment* env,
                                        const ExternalClockSyncApi* api, bool is_grandmaster, int federate_id,

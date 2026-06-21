@@ -10,7 +10,7 @@ class UcExternalClockSyncGenerator(
 ) {
 
   companion object {
-    const val numSystemEventsConst = 1
+    const val numSystemEventsConst = 2
     const val instName = "external_clock_sync"
 
     fun getNumSystemEvents(): Int = numSystemEventsConst

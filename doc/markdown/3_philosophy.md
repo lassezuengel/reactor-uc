@@ -49,4 +49,48 @@ federated reactor {
 }
 ```
 
+## External Clock Synchronization
+
+Federated programs can delegate clock synchronization to an external implementation with
+the `@external_clock_sync(module="...")` attribute. The module must provide an
+`ExternalClockSyncApi` through the generated names `lf_clock_sync_init` and
+`lf_clock_sync_schedule`.
+
+External synchronization is callback based. The runtime passes a result callback and
+opaque user data to `lf_clock_sync_init`; the external implementation stores both and
+calls the callback whenever a synchronization run completes. The callback is safe to call
+from another cooperative thread or worker queue because it only schedules a system event.
+The actual clock offset application happens later in the reactor-uc runtime context.
+
+\code{.c}
+static ExternalClockSyncResultCallback result_callback;
+static void* result_callback_user_data;
+
+int lf_clock_sync_init(bool grandmaster, int federate_id,
+                       ExternalClockSyncResultCallback callback,
+                       void* callback_user_data,
+                       bool* lf_drives_sync_schedule) {
+  result_callback = callback;
+  result_callback_user_data = callback_user_data;
+
+  // true: reactor-uc calls lf_clock_sync_schedule at the callback-reported next time.
+  // false: this implementation drives its own timing and calls result_callback itself.
+  *lf_drives_sync_schedule = true;
+  return 0;
+}
+
+int lf_clock_sync_schedule(void) {
+  int status = 0;
+  int64_t next_sync_run_ms = compute_next_sync_time();
+  int64_t clock_offset_ms = compute_clock_offset();
+
+  result_callback(result_callback_user_data, status, next_sync_run_ms, clock_offset_ms);
+  return 0;
+}
+\endcode
+
+If `*lf_drives_sync_schedule` is set to `false`, reactor-uc does not schedule calls to
+`lf_clock_sync_schedule`. In that mode, the external implementation is responsible for
+starting synchronization rounds on its own timeline and reporting each completed round
+with the result callback.
 
