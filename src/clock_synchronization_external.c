@@ -73,8 +73,7 @@ static bool ClockSynchronizationExternal_request_sync(ClockSynchronizationExtern
 }
 
 static void ClockSynchronizationExternal_schedule_next_lf_driven_sync(ClockSynchronizationExternal* self,
-                                                                      int64_t next_sync_run_ms,
-                                                                      int64_t clock_offset_ms) {
+                                                                      int64_t next_sync_run_ms) {
   if (next_sync_run_ms <= 0) {
     LF_WARN(CLOCK_SYNC_EXT, "External clock sync schedule returned invalid next time %" PRId64, next_sync_run_ms);
     return;
@@ -85,7 +84,7 @@ static void ClockSynchronizationExternal_schedule_next_lf_driven_sync(ClockSynch
     // For non-grandmaster nodes, convert local schedule time to reference time domain.
     // We stepped the clock by the offset, so the schedule time in the local time domain
     // is now correct with respect to the reference time domain!
-    schedule_time_ms = next_sync_run_ms - clock_offset_ms;
+    schedule_time_ms = next_sync_run_ms - self->last_clock_offset_ms;
   }
 
   // Schedule the next sync event at the time returned by the API (reference time domain).
@@ -117,6 +116,7 @@ static void ClockSynchronizationExternal_apply_sync_result(ClockSynchronizationE
     instant_t corrected = raw_now - offset_ns;
     LF_INFO(CLOCK_SYNC_EXT, "Stepping clock by offset %" PRId64 " ms", clock_offset_ms);
     env_fed->clock.set_time(&env_fed->clock, corrected);
+    self->last_clock_offset_ms = clock_offset_ms;
 
     interval_t offset_abs = offset_ns > 0 ? offset_ns : -offset_ns;
     if (offset_abs > MSEC(100)) {
@@ -129,8 +129,7 @@ static void ClockSynchronizationExternal_apply_sync_result(ClockSynchronizationE
   }
 
   if (self->lf_drives_sync_schedule) {
-    int64_t schedule_offset_ms = sync_status == 0 ? clock_offset_ms : 0;
-    ClockSynchronizationExternal_schedule_next_lf_driven_sync(self, next_sync_run_ms, schedule_offset_ms);
+    ClockSynchronizationExternal_schedule_next_lf_driven_sync(self, next_sync_run_ms);
   }
 }
 
@@ -184,6 +183,7 @@ void ClockSynchronizationExternal_ctor(ClockSynchronizationExternal* self, Envir
   self->api = api;
   self->is_grandmaster = is_grandmaster;
   self->lf_drives_sync_schedule = true;
+  self->last_clock_offset_ms = 0;
   self->federate_id = federate_id;
   self->super.handle = ClockSynchronizationExternal_handle_system_event;
 
