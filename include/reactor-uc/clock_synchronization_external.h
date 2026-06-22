@@ -26,15 +26,19 @@ typedef struct ClockSynchronizationExternal ClockSynchronizationExternal;
  * implementation. The callback only schedules a reactor-uc system event. Clock stepping and scheduler
  * adjustment are performed later from the runtime context.
  *
+ * The external implementation does not (need to) know about LF's time base and clock stepping.
+ * It reports the next sync run time in its own local platform-clock domain (which LF must also be based upon,
+ * see specific platform implementations!), and reactor-uc converts it to its corrected physical-clock
+ * domain using the last successfully applied offset.
+ *
  * @param user_data Opaque pointer passed to `ExternalClockSyncApi.init`.
  * @param sync_status Result of the completed sync run. Use 0 for success. Non-zero values are logged and do not
  *                    apply a clock offset.
  * @param next_sync_run_ms Absolute time in milliseconds for the next sync run, expressed in the external
  *                         implementation's uncorrected local platform-clock domain. reactor-uc converts it to its
  *                         corrected physical-clock domain using the last successfully applied offset. This is used only
- *                         when the
- *                         implementation lets reactor-uc drive the sync schedule. An implementation that drives
- *                         its own schedule can ignore this (pass an arbitrary value such as @ref @c NEVER or 0)
+ *                         when the implementation lets reactor-uc drive the sync schedule. An implementation that
+ *                         drives its own schedule can ignore this (pass an arbitrary value such as @ref @c NEVER or 0)
  *                         and schedule the next run independently.
  * @param clock_offset_ms Clock offset in milliseconds. For non-grandmasters, a successful run interprets this as
  *                        local time minus reference time. For failed runs, this may be set to an arbitrary value
