@@ -138,8 +138,7 @@ void FederatedInputConnection_prepare(Trigger* trigger, Event* event) {
 
   if (down->effects.size > 0 || down->observers.size > 0) {
     if (pool->payload_size != down->value_size) {
-      LF_ERR(FED,
-             "FederatedInputConnection %p payload size mismatch: pool payload_size=%zu downstream value_size=%zu",
+      LF_ERR(FED, "FederatedInputConnection %p payload size mismatch: pool payload_size=%zu downstream value_size=%zu",
              trigger, pool->payload_size, down->value_size);
       validate(false);
     }
@@ -164,9 +163,7 @@ void FederatedInputConnection_prepare(Trigger* trigger, Event* event) {
       down->super.prepare(&down->super, event);
       down->intended_tag = event->intended_tag;
     } else {
-      LF_WARN(FED,
-              "Downstream port %p of federated input connection %p was already present.",
-              down, trigger);
+      LF_WARN(FED, "Downstream port %p of federated input connection %p was already present.", down, trigger);
     }
   }
 
@@ -222,8 +219,8 @@ void FederatedConnectionBundle_handle_tagged_msg(FederatedConnectionBundle* self
   LF_DEBUG(FED, "Callback on FedConnBundle %p for message of size=%u with tag:" PRINTF_TAG, self, msg->payload.size,
            msg->tag);
   if (msg->conn_id < 0 || ((size_t)msg->conn_id) >= self->inputs_size) {
-    LF_ERR(FED, "Tagged message has invalid conn_id=%d for bundle %p (inputs_size=%zu). Dropping", msg->conn_id,
-           self, self->inputs_size);
+    LF_ERR(FED, "Tagged message has invalid conn_id=%d for bundle %p (inputs_size=%zu). Dropping", msg->conn_id, self,
+           self->inputs_size);
     return;
   }
   lf_ret_t ret;

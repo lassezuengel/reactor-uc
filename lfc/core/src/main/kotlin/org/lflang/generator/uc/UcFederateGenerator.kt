@@ -24,6 +24,8 @@ class UcFederateGenerator(
       UcInstanceGenerator(
           container, parameters, ports, connections, reactions, fileConfig, messageReporter)
   private val clockSync = UcClockSyncGenerator(currentFederate, connections, targetConfig)
+  private val externalClockSync =
+      UcExternalClockSyncGenerator(container, currentFederate, otherFederates)
 
   private val startupCooordinator =
       UcStartupCoordinatorGenerator(
@@ -52,6 +54,7 @@ class UcFederateGenerator(
             |  // Startup and clock sync objects.
         ${" |  "..startupCooordinator.generateFederateStructField()}
         ${" |  "..clockSync.generateFederateStructField()}
+        ${" |  "..externalClockSync.generateFederateStructField()}
             |  LF_FEDERATE_BOOKKEEPING_INSTANCES(${connections.getNumFederatedConnectionBundles()})
             |} ${currentFederate.codeType};
             |
@@ -69,6 +72,7 @@ class UcFederateGenerator(
         ${" |   "..connections.generateFederateCtorCodes()}
         ${" |   "..connections.generateReactorCtorCodes()}
         ${" |   "..clockSync.generateFederateCtorCode()}
+        ${" |   "..externalClockSync.generateFederateCtorCode()}
         ${" |   "..startupCooordinator.generateFederateCtorCode()}
             |}
             |
@@ -86,9 +90,13 @@ class UcFederateGenerator(
             |#include "reactor-uc/reactor-uc.h"
             |#include "${fileConfig.getReactorHeaderPath(reactor).toUnixString()}"
         ${" |"..connections.generateNetworkChannelIncludes()}
+        ${" |"..externalClockSync.generateModuleInclude()}
             |
+        ${" |"..externalClockSync.generateApiStruct()}
+        ${" |"..externalClockSync.generateApiConfig()}
         ${" |"..startupCooordinator.generateSelfStruct()}
         ${" |"..clockSync.generateSelfStruct()}
+        ${" |"..externalClockSync.generateSelfStruct()}
         ${" |"..connections.generateFederatedSelfStructs()}
         ${" |"..connections.generateSelfStructs()}
         ${" |"..generateFederateStruct()}
@@ -105,6 +113,7 @@ class UcFederateGenerator(
             |
         ${" |"..startupCooordinator.generateCtor()}
         ${" |"..clockSync.generateCtor()}
+        ${" |"..externalClockSync.generateCtor()}
         ${" |"..connections.generateFederatedCtors()}
         ${" |"..connections.generateCtors()}
         ${" |"..generateCtorDefinition()}

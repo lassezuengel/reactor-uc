@@ -108,7 +108,7 @@
 #endif
 #endif
 
-// #define LF_LOG_LEVEL_NET LF_LOG_LEVEL_INFO
+#define LF_LOG_LEVEL_NET LF_LOG_LEVEL_INFO
 /** The log level of the network channels.*/
 #ifndef LF_LOG_LEVEL_NET
 #ifdef LF_LOG_LEVEL_ALL
@@ -125,6 +125,15 @@
 #define LF_LOG_LEVEL_CLOCK_SYNC LF_LOG_LEVEL_ALL
 #else
 #define LF_LOG_LEVEL_CLOCK_SYNC LF_LOG_LEVEL_ERROR
+#endif
+#endif
+
+/** The log level of the external clock synchronization.*/
+#ifndef LF_LOG_LEVEL_CLOCK_SYNC_EXT
+#ifdef LF_LOG_LEVEL_ALL
+#define LF_LOG_LEVEL_CLOCK_SYNC_EXT LF_LOG_LEVEL_ALL
+#else
+#define LF_LOG_LEVEL_CLOCK_SYNC_EXT LF_LOG_LEVEL_ERROR
 #endif
 #endif
 

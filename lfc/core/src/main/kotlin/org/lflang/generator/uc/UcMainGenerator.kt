@@ -182,12 +182,17 @@ class UcMainGeneratorFederated(
   private val netBundlesSize = ucConnectionGenerator.getNumFederatedConnectionBundles()
   private val clockSyncGenerator =
       UcClockSyncGenerator(currentFederate, ucConnectionGenerator, targetConfig)
+  private val externalClockSyncGenerator =
+      UcExternalClockSyncGenerator(top, currentFederate, otherFederates)
   private val longestPath = 0
 
   override fun getNumSystemEvents(): Int {
     val clockSyncSystemEvents = UcClockSyncGenerator.getNumSystemEvents(netBundlesSize)
     val startupCoordinatorEvents = UcStartupCoordinatorGenerator.getNumSystemEvents(netBundlesSize)
-    return clockSyncSystemEvents + startupCoordinatorEvents
+    val externalClockSyncEvents =
+        if (externalClockSyncGenerator.enabled()) UcExternalClockSyncGenerator.getNumSystemEvents()
+        else 0
+    return clockSyncSystemEvents + startupCoordinatorEvents + externalClockSyncEvents
   }
 
   override fun keepAlive(): Boolean {
@@ -205,8 +210,8 @@ class UcMainGeneratorFederated(
   }
 
   /**
-   * Extract the IPv6 address from the federate's network interfaces.
-   * Returns null if no IPv6-based interface is found.
+   * Extract the IPv6 address from the federate's network interfaces. Returns null if no IPv6-based
+   * interface is found.
    */
   private fun getIpv6Address(): String? {
     return currentFederate.interfaces
@@ -232,17 +237,18 @@ class UcMainGeneratorFederated(
         val ipv6Addr = if (needsConnectionManager) getIpv6Address() else null
         val connectionManagerBlock =
             if (needsConnectionManager) {
-              val ipv6Setup = if (ipv6Addr != null) {
-                """
+              val ipv6Setup =
+                  if (ipv6Addr != null) {
+                    """
             |    int lf_ipv6_set_ret = lf_set_ipv6_address("$ipv6Addr");
             |    if (lf_ipv6_set_ret != 0) {
             |        printf("Failed to set IPv6 address (%d)\n", lf_ipv6_set_ret);
             |        return;
             |    }
             |"""
-              } else {
-                ""
-              }
+                  } else {
+                    ""
+                  }
               """
             |#if defined(PLATFORM_ZEPHYR)
             |    printf("Waiting for network connection....\n");
@@ -276,7 +282,8 @@ class UcMainGeneratorFederated(
         ${" |    "..generateInitializeScheduler()}
             |    FederatedEnvironment_ctor(&lf_environment, (Reactor *)&main_reactor, scheduler, ${fast()},
             |                     (FederatedConnectionBundle **) &main_reactor._bundles, ${netBundlesSize}, &main_reactor.${UcStartupCoordinatorGenerator.instName}.super,
-            |                     ${if (clockSyncGenerator.enabled()) "&main_reactor.${UcClockSyncGenerator.instName}.super" else "NULL"});
+            |                     ${if (clockSyncGenerator.enabled()) "&main_reactor.${UcClockSyncGenerator.instName}.super" else "NULL"},
+            |                     ${if (externalClockSyncGenerator.enabled()) "&main_reactor.${UcExternalClockSyncGenerator.instName}.super" else "NULL"});
             |    ${currentFederate.codeType}_ctor(&main_reactor, NULL, _lf_environment);
             |    _lf_environment->assemble(_lf_environment);
             |    _lf_environment->start(_lf_environment);

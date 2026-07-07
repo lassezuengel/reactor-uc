@@ -33,7 +33,7 @@ bool client_callback_called = false;
 
 void setUp(void) {
   /* init environment */
-  FederatedEnvironment_ctor(&env, NULL, NULL, false, net_bundles, 2, &startup_coordinator, NULL);
+  FederatedEnvironment_ctor(&env, NULL, NULL, false, net_bundles, 2, &startup_coordinator, NULL, NULL);
 
   /* init server */
   TcpIpChannel_ctor(&_server_tcp_channel, HOST, PORT, AF_INET, true);

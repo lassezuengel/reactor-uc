@@ -47,14 +47,8 @@ void k_sys_fatal_error_handler(unsigned int reason, const struct arch_esf* esf) 
   }
 #endif
 
-  LF_ERR(PLATFORM,
-         "Zephyr kernel panic reason=%u (%s) thread=%p name=%s isr=%d esf=%p",
-         reason,
-         reason_str,
-         tid,
-         thread_name,
-         (int)k_is_in_isr(),
-         esf);
+  LF_ERR(PLATFORM, "Zephyr kernel panic reason=%u (%s) thread=%p name=%s isr=%d esf=%p", reason, reason_str, tid,
+         thread_name, (int)k_is_in_isr(), esf);
 
   char reason_msg[128];
   snprintf(reason_msg, sizeof(reason_msg), "Zephyr kernel panic reason=%u (%s)", reason, reason_str);

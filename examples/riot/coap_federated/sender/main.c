@@ -104,7 +104,7 @@ LF_REACTOR_CTOR_SIGNATURE(MainSender) {
   LF_INITIALIZE_CLOCK_SYNC(Federate);
 }
 
-LF_ENTRY_POINT_FEDERATED(MainSender,32,32,32, SEC(1), true, 1, false)
+LF_ENTRY_POINT_FEDERATED(MainSender,32,32,32, SEC(1), true, 1, false, NULL)
 
 int main() {
   lf_start();

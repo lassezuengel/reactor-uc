@@ -289,7 +289,17 @@ static void StartupCoordinator_handle_start_time_proposal(StartupCoordinator* se
       // Calculate and broadcast our own initial proposal.
       instant_t my_proposal;
       if ((env_fed->do_clock_sync && env_fed->clock_sync->is_grandmaster) || !env_fed->do_clock_sync) {
-        my_proposal = self->env->get_physical_time(self->env) + (MSEC(100) * self->longest_path);
+        // In lossy environments, retransmissions and delayed message deliveries can cause the negotiated
+        // start time to become stale (i.e., the current physical time has already passed the negotiated
+        // start time by the time it is received by some neighbors). To mitigate this, we set our initial
+        // proposal to be some time in the future. For lossy networks and high retransmission delays, we
+        // use something as big as 1 second per hop.
+        //
+        // TODO: The magic number should definitely be configurable. When using higher retransmission timeouts
+        // and/or more lossy links, the choice of the initial proposal becomes more critical and the federation
+        // might fail to startup (see `Environment_schedule_startups`). If we choose a number too high, though,
+        // we will have unnecessarily long startup times on good networks.
+        my_proposal = self->env->get_physical_time(self->env) + (MSEC(1000) * self->longest_path);
       } else {
         my_proposal = NEVER;
       }
@@ -325,14 +335,12 @@ static void StartupCoordinator_handle_start_time_proposal(StartupCoordinator* se
       // Handle duplicates and out-of-order proposals gracefully on lossy links.
       size_t* last_step = &self->neighbor_state[payload->neighbor_index].start_time_proposals_received;
       if (step <= *last_step) {
-        LF_WARN(FED,
-                "Ignoring duplicate/stale start time proposal from federate %d: step=%zu last_step=%zu",
+        LF_WARN(FED, "Ignoring duplicate/stale start time proposal from federate %d: step=%zu last_step=%zu",
                 payload->neighbor_index, step, *last_step);
         break;
       }
       if (step > (*last_step + 1)) {
-        LF_WARN(FED,
-                "Ignoring out-of-order start time proposal from federate %d: step=%zu expected=%zu",
+        LF_WARN(FED, "Ignoring out-of-order start time proposal from federate %d: step=%zu expected=%zu",
                 payload->neighbor_index, step, *last_step + 1);
         break;
       }
@@ -513,7 +521,7 @@ static void StartupCoordinator_handle_system_event(SystemEventHandler* _self, Sy
   StartupEvent* payload = (StartupEvent*)event->super.payload;
   switch (payload->msg.which_message) {
   case StartupCoordination_startup_handshake_request_tag:
-    LF_INFO(FED, "Handle: Handshake Reqeust Tag System Event");
+    LF_INFO(FED, "Handle: Handshake Request Tag System Event");
     StartupCoordinator_handle_startup_handshake_request(self, payload);
     break;
 
@@ -553,7 +561,7 @@ static void StartupCoordinator_handle_system_event(SystemEventHandler* _self, Sy
 
 void StartupCoordinator_start(StartupCoordinator* self) {
   // Default behavior when clock-sync is enabled: start with a handshake request.
-  StartupCoordinator_schedule_system_self_event(self, self->env->get_physical_time(self->env) + MSEC(250),
+  StartupCoordinator_schedule_system_self_event(self, self->env->get_physical_time(self->env) + MSEC(16000),
                                                 StartupCoordination_startup_handshake_request_tag);
 }
 

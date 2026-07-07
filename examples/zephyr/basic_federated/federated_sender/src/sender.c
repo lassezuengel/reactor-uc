@@ -120,7 +120,7 @@ LF_FEDERATED_CONNECTION_BUNDLE_CTOR_SIGNATURE(Sender, Receiver1) {
   TcpIpChannel_ctor(&self->channel, "192.168.1.100", PORT_CONN_1, AF_INET, true);
 
   LF_FEDERATED_CONNECTION_BUNDLE_CALL_CTOR();
-  
+
   LF_INITIALIZE_FEDERATED_OUTPUT_CONNECTION(Sender, out, serialize_payload_default);
 }
 
@@ -129,7 +129,7 @@ LF_FEDERATED_CONNECTION_BUNDLE_CTOR_SIGNATURE(Sender, Receiver2) {
   TcpIpChannel_ctor(&self->channel, "192.168.1.100", PORT_CONN_2, AF_INET, true);
 
   LF_FEDERATED_CONNECTION_BUNDLE_CALL_CTOR();
-  
+
   LF_INITIALIZE_FEDERATED_OUTPUT_CONNECTION(Sender, out, serialize_payload_default);
 }
 
@@ -168,7 +168,7 @@ LF_REACTOR_CTOR_SIGNATURE(MainSender) {
   lf_connect_federated_output((Connection*)self->Sender_Receiver2_bundle.outputs[0], (Port*)self->sender->out);
 }
 
-LF_ENTRY_POINT_FEDERATED(MainSender,32,32,32, FOREVER, true, 2, true)
+LF_ENTRY_POINT_FEDERATED(MainSender,32,32,32, FOREVER, true, 2, true, NULL)
 
 int main() {
   setup_button();

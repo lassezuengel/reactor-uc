@@ -2,11 +2,11 @@ package org.lflang.generator.uc
 
 import org.lflang.AttributeUtils
 import org.lflang.TimeValue
-import org.lflang.getWidth
 import org.lflang.generator.orNever
 import org.lflang.generator.uc.UcInstanceGenerator.Companion.codeWidth
 import org.lflang.generator.uc.UcInstanceGenerator.Companion.width
 import org.lflang.generator.uc.UcPortGenerator.Companion.width
+import org.lflang.getWidth
 import org.lflang.lf.Connection
 import org.lflang.lf.Port
 import org.lflang.lf.VarRef

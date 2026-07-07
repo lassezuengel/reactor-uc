@@ -125,6 +125,8 @@ struct RUdpIpChannel {
   bool handshake_ready_acked;
   int64_t handshake_last_hello_send_time_ms;
   int64_t handshake_last_ready_send_time_ms;
+  int handshake_hello_retransmit_delay_ms;
+  int handshake_ready_retransmit_delay_ms;
   int handshake_hello_retry_count;
   int handshake_ready_retry_count;
 };

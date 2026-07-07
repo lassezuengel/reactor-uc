@@ -603,6 +603,24 @@ typedef struct FederatedInputConnection FederatedInputConnection;
 
 #define LF_INITIALIZE_CLOCK_SYNC(ReactorName) ReactorName##ClockSynchronization_ctor(&self->clock_sync, env);
 
+#define LF_DEFINE_EXTERNAL_CLOCK_SYNC_STRUCT(ReactorName, NumEvents)                                                   \
+  typedef struct {                                                                                                     \
+    ClockSynchronizationExternal super;                                                                                \
+    ExternalClockSyncEvent events[(NumEvents)];                                                                        \
+    bool used[(NumEvents)];                                                                                            \
+  } ReactorName##ExternalClockSync;
+
+#define LF_DEFINE_EXTERNAL_CLOCK_SYNC_CTOR(ReactorName, NumEvents, ApiSymbol, IsGrandmaster, FederateId)               \
+  void ReactorName##ExternalClockSync_ctor(ReactorName##ExternalClockSync* self, Environment* env) {                   \
+    ClockSynchronizationExternal_ctor(&self->super, env, &(ApiSymbol), (IsGrandmaster), (FederateId),                  \
+                                      sizeof(ExternalClockSyncEvent), (void*)self->events, self->used, (NumEvents));   \
+  }
+
+#define LF_DEFINE_EXTERNAL_CLOCK_SYNC(ReactorName) ReactorName##ExternalClockSync external_clock_sync;
+
+#define LF_INITIALIZE_EXTERNAL_CLOCK_SYNC(ReactorName)                                                                 \
+  ReactorName##ExternalClockSync_ctor(&self->external_clock_sync, env);
+
 #define LF_INITIALIZE_FEDERATED_INPUT_CONNECTION(ReactorName, InputName, DeserializeFunc)                              \
   ReactorName##_##InputName##_conn_ctor(&self->InputName, self->super.parent);                                         \
   self->inputs[_inputs_idx] = &self->InputName.super;                                                                  \
@@ -681,7 +699,7 @@ typedef struct FederatedInputConnection FederatedInputConnection;
   }
 
 #define LF_ENTRY_POINT_FEDERATED(FederateName, NumEvents, NumSystemEvents, NumReactions, Timeout, KeepAlive,           \
-                                 NumBundles, DoClockSync)                                                              \
+                                 NumBundles, DoClockSync, ExternalClockSync)                                           \
   static FederateName main_reactor;                                                                                    \
   static FederatedEnvironment env;                                                                                     \
   Environment* _lf_environment = &env.super;                                                                           \
@@ -700,9 +718,10 @@ typedef struct FederatedInputConnection FederatedInputConnection;
     ReactionQueue_ctor(&reaction_queue, (Reaction**)reactions, level_size, (NumReactions));                            \
     DynamicScheduler_ctor(&scheduler, _lf_environment, &event_queue, &system_event_queue, &reaction_queue, (Timeout),  \
                           (KeepAlive));                                                                                \
-    FederatedEnvironment_ctor(                                                                                         \
-        &env, (Reactor*)&main_reactor, &scheduler.super, false, (FederatedConnectionBundle**)&main_reactor._bundles,   \
-        (NumBundles), &main_reactor.startup_coordinator.super, (DoClockSync) ? &main_reactor.clock_sync.super : NULL); \
+    FederatedEnvironment_ctor(&env, (Reactor*)&main_reactor, &scheduler.super, false,                                  \
+                              (FederatedConnectionBundle**)&main_reactor._bundles, (NumBundles),                       \
+                              &main_reactor.startup_coordinator.super,                                                 \
+                              (DoClockSync) ? &main_reactor.clock_sync.super : NULL, (ExternalClockSync));             \
     FederateName##_ctor(&main_reactor, NULL, _lf_environment);                                                         \
     env.net_bundles_size = (NumBundles);                                                                               \
     env.net_bundles = (FederatedConnectionBundle**)&main_reactor._bundles;                                             \

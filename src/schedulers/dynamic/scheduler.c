@@ -49,8 +49,7 @@ static void Scheduler_pop_system_events_and_handle(Scheduler* untyped_self, tag_
     LF_DEBUG(SCHED, "Popped system event %p with tag" PRINTF_TAG "next tag" PRINTF_TAG, system_event,
              system_event->super.tag, next_tag);
     if (lf_tag_compare(system_event->super.tag, next_tag) != 0) {
-      LF_ERR(SCHED,
-             "System event tag mismatch: popped tag=" PRINTF_TAG " expected next_tag=" PRINTF_TAG,
+      LF_ERR(SCHED, "System event tag mismatch: popped tag=" PRINTF_TAG " expected next_tag=" PRINTF_TAG,
              system_event->super.tag, next_tag);
       validate(false);
     }
@@ -85,8 +84,8 @@ static void Scheduler_pop_events_and_prepare(Scheduler* untyped_self, tag_t next
 
     validate(event->super.type == EVENT);
     if (lf_tag_compare(event->super.tag, next_tag) != 0) {
-      LF_ERR(SCHED, "Event tag mismatch: popped tag=" PRINTF_TAG " expected next_tag=" PRINTF_TAG,
-             event->super.tag, next_tag);
+      LF_ERR(SCHED, "Event tag mismatch: popped tag=" PRINTF_TAG " expected next_tag=" PRINTF_TAG, event->super.tag,
+             next_tag);
       validate(false);
     }
     LF_DEBUG(SCHED, "Handling event %p for tag " PRINTF_TAG, event, event->super.tag);
@@ -158,8 +157,7 @@ void Scheduler_clean_up_timestep(Scheduler* untyped_self) {
   while (cleanup_trigger) {
     Trigger* this = cleanup_trigger;
     if (this->next == NULL && this != self->cleanup_ll_tail) {
-      LF_ERR(SCHED, "Cleanup list invariant broken: node %p has next=NULL but tail=%p", this,
-             self->cleanup_ll_tail);
+      LF_ERR(SCHED, "Cleanup list invariant broken: node %p has next=NULL but tail=%p", this, self->cleanup_ll_tail);
       validate(false);
     }
     this->cleanup(this);
