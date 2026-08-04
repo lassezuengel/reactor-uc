@@ -727,7 +727,7 @@ static int _RUdpIpChannel_send_outgoing_packet(RUdpIpChannel* self, int buffer_i
 
   if (packets_sent++ % 500 == 0 && packets_sent > 1) {
     RUDP_IP_CHANNEL_STAT("%d packets sent, %d retransmissions", packets_sent, packets_retransmitted);
-    RUDP_IP_CHANNEL_ERR("%d packets sent, %d retransmissions", packets_sent, packets_retransmitted);
+    // RUDP_IP_CHANNEL_ERR("%d packets sent, %d retransmissions", packets_sent, packets_retransmitted);
   }
 
   if (bytes_sent < 0) {
@@ -1087,7 +1087,7 @@ static void _RUdpIpChannel_handle_received_data(RUdpIpChannel* self, int uid, co
 
   if (packets_received++ % 500 == 0 && packets_received > 1) {
     RUDP_IP_CHANNEL_STAT("%u packets received, %u duplicates", packets_received, packets_received_duplicates);
-    RUDP_IP_CHANNEL_ERR("%u packets received, %u duplicates", packets_received, packets_received_duplicates);
+    // RUDP_IP_CHANNEL_ERR("%u packets received, %u duplicates", packets_received, packets_received_duplicates);
   }
 
   RUDP_IP_CHANNEL_DEBUG("Received data packet uid=%d, payload_length=%d, next_expected=%d", uid, payload_length,
